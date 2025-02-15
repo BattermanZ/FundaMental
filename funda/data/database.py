@@ -1,9 +1,21 @@
 import sqlite3
 from datetime import datetime
+import os
 
 class FundaDB:
-    def __init__(self, db_path='funda.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        if db_path is None:
+            # Get the project root directory (parent of funda package)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            # Construct path to database directory
+            db_dir = os.path.join(project_root, 'database')
+            # Create directory if it doesn't exist
+            os.makedirs(db_dir, exist_ok=True)
+            # Set database path
+            self.db_path = os.path.join(db_dir, 'funda.db')
+        else:
+            self.db_path = db_path
+        
         self.init_db()
 
     def init_db(self):

@@ -47,3 +47,4 @@ sold_listing.html
 
 # Database
 *.db
+database/
