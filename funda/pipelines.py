@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+from funda.database import FundaDB
+
 # Define your item pipelines here
 #
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
@@ -7,6 +9,9 @@
 
 
 class FundaPipeline(object):
+    def __init__(self):
+        self.db = FundaDB()
+
     def process_item(self, item, spider):
         # Clean up price (remove currency symbol and convert to int)
         if 'price' in item and item['price']:
@@ -40,5 +45,16 @@ class FundaPipeline(object):
             except ValueError:
                 spider.logger.warning(f"Could not convert year_built to integer: {item['year_built']}")
                 item['year_built'] = None
+
+        # Store in database
+        self.db.insert_property(item)
         
         return item
+
+    def close_spider(self, spider):
+        """When spider finishes, print some basic stats."""
+        stats = self.db.get_basic_stats()
+        spider.logger.info("Scraping completed! Basic statistics:")
+        spider.logger.info(f"Total properties: {stats['total_properties']}")
+        spider.logger.info(f"Average price: €{stats['avg_price']:,.2f}")
+        spider.logger.info(f"Average days to sell: {stats['avg_days_to_sell']:.1f} days")
