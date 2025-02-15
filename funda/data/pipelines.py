@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from funda.database import FundaDB
+from funda.data.database import FundaDB
 
 # Define your item pipelines here
 #

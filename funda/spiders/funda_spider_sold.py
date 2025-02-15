@@ -2,7 +2,7 @@ import re
 import scrapy
 from scrapy.spiders import CrawlSpider, Rule
 from scrapy.linkextractors import LinkExtractor
-from funda.items import FundaItem
+from funda.core.items import FundaItem
 from scrapy.http import Request
 import json
 import random

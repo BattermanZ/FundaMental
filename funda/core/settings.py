@@ -78,7 +78,7 @@ AUTOTHROTTLE_DEBUG = True
 
 # Configure item pipelines
 ITEM_PIPELINES = {
-    "funda.pipelines.FundaPipeline": 300,
+    "funda.data.pipelines.FundaPipeline": 300,
 }
 
 # Default Request Headers
