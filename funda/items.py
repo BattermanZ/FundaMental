@@ -12,4 +12,6 @@ class FundaItem(scrapy.Item):
     living_area = scrapy.Field()  # Size in square meters
     num_rooms = scrapy.Field()
     status = scrapy.Field()
+    listing_date = scrapy.Field()  # Date when property was listed
+    selling_date = scrapy.Field()  # Date when property was sold
     scraped_at = scrapy.Field()

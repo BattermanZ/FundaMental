@@ -137,12 +137,23 @@ class FundaSpiderSold(scrapy.Spider):
         json_ld_scripts = response.css('script[type="application/ld+json"]::text').getall()
         self.logger.info(f"Found {len(json_ld_scripts)} JSON-LD scripts")
 
+        # Extract dates from the page
+        # First try to find dates in the JSON-LD data
+        dates_found = False
         for script in json_ld_scripts:
             try:
                 data = json.loads(script)
                 if isinstance(data, dict):
                     self.logger.info(f"JSON-LD data type: {data.get('@type')}")
                     self.logger.info(f"JSON-LD keys: {data.keys()}")
+
+                    # Check for dates in JSON-LD
+                    if 'datePosted' in data:
+                        item['listing_date'] = data['datePosted']
+                        dates_found = True
+                    if 'dateSold' in data:
+                        item['selling_date'] = data['dateSold']
+                        dates_found = True
 
                     # Extract basic info from JSON-LD
                     if data.get('@type') in ['Appartement', 'Product'] or (isinstance(data.get('@type'), list) and 'Appartement' in data['@type']):
@@ -203,6 +214,48 @@ class FundaSpiderSold(scrapy.Spider):
 
             except json.JSONDecodeError as e:
                 self.logger.warning(f"Could not parse JSON-LD: {e}")
+
+        # If dates not found in JSON-LD, try HTML selectors
+        if not dates_found:
+            # Try to find listing date and selling date in the HTML
+            date_selectors = [
+                'dt:contains("Aangeboden sinds") + dd::text',
+                'dt:contains("Verkoopdatum") + dd::text',
+                'li:contains("Aangeboden sinds") span.fd-text--emphasis::text',
+                'li:contains("Verkoopdatum") span.fd-text--emphasis::text',
+                'span[data-testid="listing-date"]::text',
+                'span[data-testid="sale-date"]::text'
+            ]
+            
+            for selector in date_selectors:
+                date_text = response.css(selector).get()
+                if date_text:
+                    self.logger.info(f"Found date text with selector '{selector}': {date_text}")
+                    try:
+                        # Convert Dutch month names to numbers
+                        dutch_months = {
+                            'januari': '01', 'februari': '02', 'maart': '03', 'april': '04',
+                            'mei': '05', 'juni': '06', 'juli': '07', 'augustus': '08',
+                            'september': '09', 'oktober': '10', 'november': '11', 'december': '12'
+                        }
+                        
+                        # Clean and standardize the date text
+                        date_text = date_text.lower().strip()
+                        for dutch, num in dutch_months.items():
+                            date_text = date_text.replace(dutch, num)
+                        
+                        # Extract the date using regex
+                        date_match = re.search(r'(\d{1,2})\s+(\d{2})\s+(\d{4})', date_text)
+                        if date_match:
+                            day, month, year = date_match.groups()
+                            formatted_date = f"{year}-{month}-{int(day):02d}"
+                            
+                            if 'Aangeboden' in selector:
+                                item['listing_date'] = formatted_date
+                            elif 'Verkoop' in selector:
+                                item['selling_date'] = formatted_date
+                    except Exception as e:
+                        self.logger.warning(f"Failed to parse date from text '{date_text}': {e}")
 
         # If address not found in JSON-LD, try HTML
         if not item.get('street') or not item.get('postal_code'):
