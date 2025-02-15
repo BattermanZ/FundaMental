@@ -2,6 +2,8 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
+	"fundamental/server/internal/geocoding"
 	"fundamental/server/internal/models"
 	"time"
 
@@ -240,4 +242,113 @@ func (d *Database) GetRecentSales(limit int) ([]models.Property, error) {
 
 func (d *Database) Close() error {
 	return d.db.Close()
+}
+
+func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error {
+	// Get total count of properties needing geocoding
+	var totalCount int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) 
+		FROM properties 
+		WHERE (latitude IS NULL OR longitude IS NULL)
+		AND street IS NOT NULL 
+		AND postal_code IS NOT NULL 
+		AND city IS NOT NULL
+	`).Scan(&totalCount)
+	if err != nil {
+		return fmt.Errorf("failed to count properties: %v", err)
+	}
+
+	if totalCount == 0 {
+		return nil
+	}
+
+	// Start a transaction
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`
+		SELECT id, street, postal_code, city 
+		FROM properties 
+		WHERE (latitude IS NULL OR longitude IS NULL)
+		AND street IS NOT NULL 
+		AND postal_code IS NOT NULL 
+		AND city IS NOT NULL
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var updated, failed int
+	stmt, err := tx.Prepare(`
+		UPDATE properties 
+		SET latitude = ?, longitude = ? 
+		WHERE id = ?
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for rows.Next() {
+		var id int64
+		var street, postalCode, city string
+		if err := rows.Scan(&id, &street, &postalCode, &city); err != nil {
+			return err
+		}
+
+		lat, lon, err := geocoder.GeocodeAddress(street, postalCode, city)
+		if err != nil {
+			failed++
+			continue
+		}
+
+		_, err = stmt.Exec(lat, lon, id)
+		if err != nil {
+			return err
+		}
+		updated++
+
+		// Log progress
+		if updated%10 == 0 {
+			fmt.Printf("Progress: %d/%d properties geocoded (%.1f%%), %d failed\n",
+				updated, totalCount, float64(updated)/float64(totalCount)*100, failed)
+		}
+
+		// Commit every 10 updates to avoid long-running transactions
+		if updated%10 == 0 {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			// Start a new transaction
+			tx, err = d.db.Begin()
+			if err != nil {
+				return err
+			}
+			// Prepare the statement again for the new transaction
+			stmt, err = tx.Prepare(`
+				UPDATE properties 
+				SET latitude = ?, longitude = ? 
+				WHERE id = ?
+			`)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Commit any remaining updates
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Log final stats
+	fmt.Printf("Geocoding completed: %d/%d properties geocoded (%.1f%%), %d failed\n",
+		updated, totalCount, float64(updated)/float64(totalCount)*100, failed)
+
+	return nil
 }

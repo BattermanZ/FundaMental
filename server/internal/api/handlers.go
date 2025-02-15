@@ -3,7 +3,10 @@ package api
 import (
 	"encoding/json"
 	"fundamental/server/internal/database"
+	"fundamental/server/internal/geocoding"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -11,14 +14,17 @@ import (
 )
 
 type Handler struct {
-	db     *database.Database
-	logger *logrus.Logger
+	db       *database.Database
+	logger   *logrus.Logger
+	geocoder *geocoding.Geocoder
 }
 
 func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
+	cacheDir := filepath.Join(os.TempDir(), "fundamental", "geocode_cache")
 	return &Handler{
-		db:     db,
-		logger: logger,
+		db:       db,
+		logger:   logger,
+		geocoder: geocoding.NewGeocoder(logger, cacheDir),
 	}
 }
 
@@ -80,6 +86,25 @@ func (h *Handler) GetRecentSales(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sales)
+}
+
+func (h *Handler) UpdateCoordinates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	err := h.db.UpdateMissingCoordinates(h.geocoder)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to update coordinates")
+		http.Error(w, "Failed to update coordinates", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "Coordinates update process started",
+	})
 }
 
 // CORS middleware
