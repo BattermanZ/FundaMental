@@ -1,4 +1,4 @@
-from funda.database import FundaDB
+from funda.data.database import FundaDB
 import pandas as pd
 from datetime import datetime
 

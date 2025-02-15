@@ -5,6 +5,8 @@ import scrapy
 class FundaItem(scrapy.Item):
     url = scrapy.Field()
     street = scrapy.Field()
+    neighborhood = scrapy.Field()  # Added neighborhood field
+    property_type = scrapy.Field()  # Added property type field
     city = scrapy.Field()
     postal_code = scrapy.Field()
     price = scrapy.Field()

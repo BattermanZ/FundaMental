@@ -29,6 +29,8 @@ class FundaDB:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     url TEXT UNIQUE,
                     street TEXT,
+                    neighborhood TEXT,
+                    property_type TEXT,
                     city TEXT,
                     postal_code TEXT,
                     price INTEGER,
@@ -56,13 +58,15 @@ class FundaDB:
             try:
                 cursor.execute('''
                     INSERT OR REPLACE INTO properties 
-                    (url, street, city, postal_code, price, year_built, 
+                    (url, street, neighborhood, property_type, city, postal_code, price, year_built, 
                      living_area, num_rooms, status, listing_date, 
                      selling_date, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     item.get('url'),
                     item.get('street'),
+                    item.get('neighborhood'),
+                    item.get('property_type'),
                     item.get('city'),
                     item.get('postal_code'),
                     item.get('price'),
