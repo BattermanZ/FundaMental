@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Property, PropertyStats, AreaStats } from '../types/property';
 
-const API_BASE_URL = 'http://localhost:8080/api';
+const API_BASE_URL = 'http://localhost:5250/api';
 
 export const api = {
     getAllProperties: async (): Promise<Property[]> => {

@@ -14,7 +14,7 @@ import pickle
 class FundaSpiderSold(scrapy.Spider):
     name = "funda_spider_sold"
     allowed_domains = ["funda.nl"]
-    
+
     def __init__(self, place='amsterdam', max_pages=None, resume=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.place = place
@@ -178,7 +178,7 @@ class FundaSpiderSold(scrapy.Spider):
 
     def parse_listing(self, response):
         self.logger.info(f"Parsing listing page: {response.url}")
-        item = FundaItem()
+                item = FundaItem()
         item['url'] = response.url
 
         # Find all JSON-LD scripts

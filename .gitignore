@@ -77,6 +77,8 @@ listing_page.html
 funda_page.html
 sold_listing.html
 httpcache/
+/server/database/
+*.db
 
 # Docker
 .docker/

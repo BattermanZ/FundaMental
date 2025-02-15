@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Property } from '../types/property';
 import { api } from '../services/api';
-import { Icon } from 'leaflet';
+import { Icon, LatLngTuple } from 'leaflet';
 
 // Fix for default marker icon
 delete (Icon.Default.prototype as any)._getIconUrl;
@@ -13,7 +13,8 @@ Icon.Default.mergeOptions({
     shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-const AMSTERDAM_CENTER = [52.3676, 4.9041];
+const AMSTERDAM_CENTER: LatLngTuple = [52.3676, 4.9041];
+const DEFAULT_POSITION: LatLngTuple = [52.3676, 4.9041];
 
 const PropertyMap: React.FC = () => {
     const [properties, setProperties] = useState<Property[]>([]);
@@ -51,7 +52,7 @@ const PropertyMap: React.FC = () => {
             {properties.map((property) => (
                 <Marker
                     key={property.id}
-                    position={[52.3676, 4.9041]} // TODO: Add geocoding to get actual coordinates
+                    position={DEFAULT_POSITION} // TODO: Add geocoding to get actual coordinates
                 >
                     <Popup>
                         <div>

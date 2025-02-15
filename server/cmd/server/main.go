@@ -16,9 +16,15 @@ func main() {
 	logger.SetFormatter(&logrus.JSONFormatter{})
 	logger.SetOutput(os.Stdout)
 
-	// Get the project root directory
-	projectRoot := filepath.Dir(filepath.Dir(filepath.Dir(os.Args[0])))
-	dbPath := filepath.Join(projectRoot, "database", "funda.db")
+	// Get the current working directory
+	currentDir, err := os.Getwd()
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to get current directory")
+	}
+
+	// Construct database path relative to the server directory
+	dbPath := filepath.Join(currentDir, "database", "funda.db")
+	logger.Infof("Using database at: %s", dbPath)
 
 	// Initialize database
 	db, err := database.NewDatabase(dbPath)
@@ -42,12 +48,8 @@ func main() {
 	router.HandleFunc("/api/areas/{postal_prefix}", handler.GetAreaStats).Methods("GET", "OPTIONS")
 	router.HandleFunc("/api/recent-sales", handler.GetRecentSales).Methods("GET", "OPTIONS")
 
-	// Start server
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
+	// Use port 5250
+	const port = "5250"
 	logger.Infof("Starting server on port %s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {
 		logger.WithError(err).Fatal("Server failed to start")

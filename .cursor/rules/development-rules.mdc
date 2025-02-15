@@ -1,0 +1,9 @@
+---
+description: Development rules
+globs: 
+---
+
+# Development rules
+
+- Only use relative paths
+- Don't do anything docker related or use docker unless explicitely asked
