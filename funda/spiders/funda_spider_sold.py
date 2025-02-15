@@ -113,39 +113,80 @@ class FundaSpiderSold(scrapy.Spider):
 
     def parse_listing(self, response):
         self.logger.info(f"Parsing listing page: {response.url}")
-        
-        # Find all JSON-LD scripts
-        json_ld_scripts = response.xpath('//script[@type="application/ld+json"]/text()').getall()
-        self.logger.info(f"Found {len(json_ld_scripts)} JSON-LD scripts")
-        
-        item = {}
+        item = FundaItem()
         item['url'] = response.url
-        
-        # Try to extract data from JSON-LD first
+
+        # Find all JSON-LD scripts
+        json_ld_scripts = response.css('script[type="application/ld+json"]::text').getall()
+        self.logger.info(f"Found {len(json_ld_scripts)} JSON-LD scripts")
+
         for script in json_ld_scripts:
             try:
                 data = json.loads(script)
-                self.logger.info(f"JSON-LD data type: {data.get('@type')}")
-                self.logger.info(f"JSON-LD keys: {list(data.keys())}")
-                
-                if 'address' in data:
-                    item['street'] = data['address'].get('streetAddress', '')
-                    item['city'] = data['address'].get('addressLocality', '')
-                    item['postal_code'] = data['address'].get('postalCode', '')
-                    
-                    # Try to extract postal code from description if not in address
-                    if not item['postal_code'] and 'description' in data:
-                        postal_match = re.search(r'(\d{4}\s?[A-Z]{2})', data['description'])
-                        if postal_match:
-                            item['postal_code'] = postal_match.group(1)
-                
-                if 'offers' in data and 'price' in data['offers']:
-                    item['price'] = data['offers']['price']
-                    
+                if isinstance(data, dict):
+                    self.logger.info(f"JSON-LD data type: {data.get('@type')}")
+                    self.logger.info(f"JSON-LD keys: {data.keys()}")
+
+                    # Extract basic info from JSON-LD
+                    if data.get('@type') in ['Appartement', 'Product'] or (isinstance(data.get('@type'), list) and 'Appartement' in data['@type']):
+                        item['street'] = data['address']['streetAddress']
+                        item['city'] = data['address']['addressLocality']
+                        item['postal_code'] = data['address'].get('postalCode', '')
+                        item['price'] = data['offers']['price']
+
+                        # Try to extract living area from JSON-LD first
+                        if 'floorSize' in data:
+                            try:
+                                area_value = data['floorSize'].get('value', 0)
+                                if area_value:
+                                    item['living_area'] = int(float(str(area_value)))
+                                    self.logger.info(f"Found living area in JSON-LD: {item['living_area']} m²")
+                            except (ValueError, AttributeError) as e:
+                                self.logger.warning(f"Could not parse living area from JSON-LD: {e}")
+                        
+                        # If living area not found in JSON-LD, try description and HTML
+                        if not item.get('living_area'):
+                            # Try to find area in description
+                            description = data.get('description', '')
+                            if description:
+                                area_match = re.search(r'(\d+(?:[.,]\d+)?)\s*m²', description)
+                                if area_match:
+                                    try:
+                                        area_str = area_match.group(1).replace(',', '.')
+                                        item['living_area'] = int(float(area_str))
+                                        self.logger.info(f"Found living area in description: {item['living_area']} m²")
+                                    except (ValueError, AttributeError) as e:
+                                        self.logger.warning(f"Could not parse living area from description: {e}")
+
+                        # Try HTML selectors if still not found
+                        if not item.get('living_area'):
+                            area_selectors = [
+                                'li:contains("m²") span.md\\:font-bold::text',
+                                'dt:contains("Woonoppervlakte") + dd::text',
+                                'span[data-testid="living-area"]::text',
+                                'span[data-testid="floor-area"]::text',
+                                'li:contains("Woonoppervlakte") span.fd-text--emphasis::text',
+                                'li:contains("Gebruiksoppervlakte") span.fd-text--emphasis::text'
+                            ]
+                            
+                            for selector in area_selectors:
+                                area_text = response.css(selector).get()
+                                if area_text:
+                                    # Clean and extract numeric value
+                                    match = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:m²|m2)?', area_text)
+                                    if match:
+                                        try:
+                                            # Replace comma with dot for decimal numbers
+                                            area_str = match.group(1).replace(',', '.')
+                                            item['living_area'] = int(float(area_str))
+                                            self.logger.info(f"Found living area in HTML: {item['living_area']} m²")
+                                            break
+                                        except (ValueError, AttributeError) as e:
+                                            self.logger.warning(f"Could not parse living area from HTML: {e}")
+
             except json.JSONDecodeError as e:
-                self.logger.error(f"Error parsing JSON-LD: {e}")
-                self.logger.error(f"Problematic content: {script[:200]}...")
-        
+                self.logger.warning(f"Could not parse JSON-LD: {e}")
+
         # If address not found in JSON-LD, try HTML
         if not item.get('street') or not item.get('postal_code'):
             self.logger.info("Falling back to HTML parsing for address")
@@ -163,64 +204,31 @@ class FundaSpiderSold(scrapy.Spider):
                 street = response.css('h1.object-header__container span.block::text').get()
                 if street:
                     item['street'] = street.strip()
-            
-            # Try alternative postal code selector
-            if not item.get('postal_code'):
-                postal_text = response.css('span[data-testid="postal-code"]::text').get()
-                if postal_text:
-                    postal_match = re.search(r'(\d{4}\s?[A-Z]{2})', postal_text)
-                    if postal_match:
-                        item['postal_code'] = postal_match.group(1)
-        
-        # Set status and timestamp
+
+        # Set the status and timestamp
         item['status'] = 'sold'
-        item['timestamp'] = datetime.now().isoformat()
-        
-        # Extract other details
-        selectors = {
-            'year_built': [
-                'dt:contains("Construction period") + dd::text',
-                'dt:contains("Bouwjaar") + dd::text',
-                'dt:contains("Bouwperiode") + dd::text'
-            ],
-            'living_area': [
-                'dt:contains("Living area") + dd::text',
-                'dt:contains("Woonoppervlakte") + dd::text',
-                'dt:contains("Gebruiksoppervlakte wonen") + dd::text'
-            ],
-            'num_rooms': [
-                'dt:contains("Number of rooms") + dd::text',
-                'dt:contains("Aantal kamers") + dd::text',
-                'dt:contains("Kamers") + dd::text'
-            ]
-        }
-        
-        for field, selector_list in selectors.items():
-            for selector in selector_list:
-                value = response.css(selector).get()
-                if value:
-                    item[field] = value.strip()
-                    self.logger.info(f"Found {field}: {value.strip()}")
-                    break
-        
-        # Clean up numeric fields
-        if item.get('year_built'):
-            try:
-                item['year_built'] = int(re.search(r'\d+', str(item['year_built'])).group())
-            except (ValueError, AttributeError):
-                item['year_built'] = None
-            
-        if item.get('living_area'):
-            try:
-                item['living_area'] = int(re.search(r'\d+', str(item['living_area'])).group())
-            except (ValueError, AttributeError):
-                item['living_area'] = None
-            
-        if item.get('num_rooms'):
-            try:
-                item['num_rooms'] = int(re.search(r'\d+', str(item['num_rooms'])).group())
-            except (ValueError, AttributeError):
-                item['num_rooms'] = None
-        
+        item['scraped_at'] = datetime.now().isoformat()
+
+        # Extract year built and number of rooms
+        try:
+            year_text = response.css('dt:contains("Bouwjaar") + dd::text').get()
+            if year_text:
+                self.logger.info(f"Found year_built: {year_text}")
+                year_match = re.search(r'(\d{4})', year_text)
+                if year_match:
+                    item['year_built'] = int(year_match.group(1))
+        except Exception as e:
+            self.logger.warning(f"Could not parse year built: {e}")
+
+        try:
+            rooms_text = response.css('dt:contains("Aantal kamers") + dd::text').get()
+            if rooms_text:
+                self.logger.info(f"Found num_rooms: {rooms_text}")
+                rooms_match = re.search(r'(\d+)\s*kamers?', rooms_text)
+                if rooms_match:
+                    item['num_rooms'] = int(rooms_match.group(1))
+        except Exception as e:
+            self.logger.warning(f"Could not parse number of rooms: {e}")
+
         self.logger.info(f"Extracted item: {item}")
         yield item
