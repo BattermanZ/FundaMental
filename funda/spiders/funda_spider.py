@@ -224,18 +224,25 @@ class FundaSpider(CrawlSpider):
         # Extract area (living area in m²)
         area_selectors = [
             'dt:contains("Woonoppervlakte") + dd::text',
-            'dt:contains("Gebruiksoppervlakte wonen") + dd::text'
+            'dt:contains("Gebruiksoppervlakte wonen") + dd::text',
+            'li:contains("Woonoppervlakte") span.fd-text--emphasis::text',
+            'li:contains("Gebruiksoppervlakte") span.fd-text--emphasis::text',
+            'span:contains("m²")::text'
         ]
+        
         for selector in area_selectors:
             area_text = response.css(selector).get()
             if area_text:
+                self.logger.info(f"Found area text with selector '{selector}': {area_text}")
                 try:
-                    # Extract numeric area from text like "62 m²"
-                    area_match = re.search(r'(\d+)\s*m²', area_text)
+                    # Extract numeric area from text like "62 m²" or "62m²" or "62 m2"
+                    area_match = re.search(r'(\d+)\s*(?:m²|m2)', area_text.strip())
                     if area_match:
                         item['area'] = int(area_match.group(1))
+                        self.logger.info(f"Successfully extracted area: {item['area']} m²")
                         break
-                except ValueError:
+                except ValueError as e:
+                    self.logger.warning(f"Failed to parse area from text '{area_text}': {e}")
                     continue
 
         self.logger.info(f"Successfully parsed {response.url}")
