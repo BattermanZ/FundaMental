@@ -8,17 +8,31 @@ import json
 import random
 from datetime import datetime
 import urllib.parse
+import os
+import pickle
 
 class FundaSpiderSold(scrapy.Spider):
     name = "funda_spider_sold"
     allowed_domains = ["funda.nl"]
     
-    def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
+    def __init__(self, place='amsterdam', max_pages=None, resume=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.place = place
-        self.max_pages = int(max_pages) if max_pages else None
+        # Set default max_pages to 200 if not specified
+        self.max_pages = int(max_pages) if max_pages else 200
         self.page_count = 1
         self.processed_urls = set()  # Track processed URLs
+        self.total_items_scraped = 0
+        self.resume = resume
+        
+        # Create state directory if it doesn't exist
+        self.state_dir = os.path.join(os.getcwd(), '.spider_state')
+        os.makedirs(self.state_dir, exist_ok=True)
+        self.state_file = os.path.join(self.state_dir, f'funda_sold_{place}_state.pkl')
+        
+        # Load previous state if resuming
+        if self.resume and os.path.exists(self.state_file):
+            self.load_state()
         
         # Base parameters for the search
         self.base_params = {
@@ -28,9 +42,15 @@ class FundaSpiderSold(scrapy.Spider):
             'sort': 'date_down'
         }
         
+        # If resuming and we have a page count, start from there
+        if self.resume and self.page_count > 1:
+            self.base_params['page'] = self.page_count
+            self.logger.info(f"Resuming from page {self.page_count}")
+        
         base_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(self.base_params)}"
         self.start_urls = [base_url]
         self.logger.info(f"Initial URL: {base_url}")
+        self.logger.info(f"Maximum pages to scrape: {self.max_pages}")
 
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -45,6 +65,29 @@ class FundaSpiderSold(scrapy.Spider):
             'sec-ch-ua-platform': '"macOS"'
         }
 
+    def save_state(self):
+        """Save current spider state for resuming later."""
+        state = {
+            'page_count': self.page_count,
+            'processed_urls': self.processed_urls,
+            'total_items_scraped': self.total_items_scraped
+        }
+        with open(self.state_file, 'wb') as f:
+            pickle.dump(state, f)
+        self.logger.info(f"Saved state: Page {self.page_count}, Items {self.total_items_scraped}")
+
+    def load_state(self):
+        """Load previous spider state."""
+        try:
+            with open(self.state_file, 'rb') as f:
+                state = pickle.load(f)
+                self.page_count = state['page_count']
+                self.processed_urls = state['processed_urls']
+                self.total_items_scraped = state['total_items_scraped']
+                self.logger.info(f"Loaded state: Page {self.page_count}, Items {self.total_items_scraped}")
+        except Exception as e:
+            self.logger.error(f"Error loading state: {e}")
+
     def start_requests(self):
         for url in self.start_urls:
             yield Request(
@@ -55,7 +98,7 @@ class FundaSpiderSold(scrapy.Spider):
             )
 
     def parse(self, response):
-        self.logger.info(f"Parsing response from URL: {response.url}")
+        self.logger.info(f"Parsing page {self.page_count} of max {self.max_pages}")
         
         # Check if we're being blocked or redirected
         if response.status in [403, 302, 503]:
@@ -88,7 +131,7 @@ class FundaSpiderSold(scrapy.Spider):
                 full_url = response.urljoin(url)
                 listing_urls.add(full_url)
         
-        self.logger.info(f"Found {len(listing_urls)} unique listings on page {self.page_count}")
+        self.logger.info(f"Found {len(listing_urls)} new listings on page {self.page_count}")
         
         # Process found listings
         for url in listing_urls:
@@ -100,14 +143,17 @@ class FundaSpiderSold(scrapy.Spider):
                 meta={'dont_cache': True}
             )
         
-        # Handle pagination
-        if self.max_pages is None or self.page_count < self.max_pages:
+        # Save state after processing each page
+        self.save_state()
+        
+        # Handle pagination if we haven't reached max_pages
+        if self.page_count < self.max_pages:
             # Look for next page button
             next_page = response.css('a[data-test-id="next-page-button"]::attr(href)').get()
             if next_page:
                 self.page_count += 1
                 next_url = response.urljoin(next_page)
-                self.logger.info(f"Moving to next page: {next_url}")
+                self.logger.info(f"Moving to page {self.page_count}")
                 yield scrapy.Request(
                     next_url,
                     callback=self.parse,
@@ -120,13 +166,15 @@ class FundaSpiderSold(scrapy.Spider):
                 next_page_params = self.base_params.copy()
                 next_page_params['page'] = self.page_count
                 next_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(next_page_params)}"
-                self.logger.info(f"Trying manual next page: {next_url}")
+                self.logger.info(f"Moving to page {self.page_count} (manual construction)")
                 yield scrapy.Request(
                     next_url,
                     callback=self.parse,
                     headers=self.headers,
                     meta={'dont_cache': True}
                 )
+        else:
+            self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
 
     def parse_listing(self, response):
         self.logger.info(f"Parsing listing page: {response.url}")
@@ -300,5 +348,20 @@ class FundaSpiderSold(scrapy.Spider):
         except Exception as e:
             self.logger.warning(f"Could not parse number of rooms: {e}")
 
+        self.total_items_scraped += 1
+        if self.total_items_scraped % 10 == 0:  # Log progress every 10 items
+            self.logger.info(f"Progress: Scraped {self.total_items_scraped} items from {self.page_count} pages")
+        
         self.logger.info(f"Extracted item: {item}")
         yield item
+
+    def closed(self, reason):
+        """Called when the spider is closed."""
+        self.logger.info(f"Spider closed: {reason}")
+        self.logger.info(f"Final statistics:")
+        self.logger.info(f"Total pages scraped: {self.page_count}")
+        self.logger.info(f"Total items scraped: {self.total_items_scraped}")
+        self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}")
+        
+        # Save final state
+        self.save_state()
