@@ -18,16 +18,16 @@ class FundaSpiderSold(scrapy.Spider):
         self.place = place
         self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
+        self.processed_urls = set()  # Track processed URLs
         
         # Base parameters for the search
         self.base_params = {
-            'selected_area': json.dumps([place]),  # JSON encode the array
-            'availability': json.dumps(['unavailable']),  # JSON encode the array
-            'object_type': json.dumps(['house', 'apartment']),  # JSON encode the array
-            'sort': 'date_down'  # Sort by date descending
+            'selected_area': json.dumps([place]),
+            'availability': json.dumps(['unavailable']),
+            'object_type': json.dumps(['house', 'apartment']),
+            'sort': 'date_down'
         }
         
-        # Construct the base URL with encoded parameters
         base_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(self.base_params)}"
         self.start_urls = [base_url]
         self.logger.info(f"Initial URL: {base_url}")
@@ -57,59 +57,76 @@ class FundaSpiderSold(scrapy.Spider):
     def parse(self, response):
         self.logger.info(f"Parsing response from URL: {response.url}")
         
-        # Log the response content for debugging
-        self.logger.info(f"Response body preview: {response.text[:500]}")
+        # Check if we're being blocked or redirected
+        if response.status in [403, 302, 503]:
+            self.logger.error(f"Received status {response.status} for URL: {response.url}")
+            return
         
-        # Extract data from JSON-LD script
+        # Extract listings from both JSON-LD and HTML
+        listing_urls = set()
+        
+        # 1. Try JSON-LD first
         json_ld_scripts = response.xpath('//script[@type="application/ld+json"]/text()').getall()
-        self.logger.info(f"Found {len(json_ld_scripts)} JSON-LD scripts")
-        
-        found_listings = False
         for script in json_ld_scripts:
             try:
                 data = json.loads(script)
-                self.logger.info(f"JSON-LD data type: {type(data)}")
-                self.logger.info(f"JSON-LD keys: {data.keys() if isinstance(data, dict) else 'not a dict'}")
-                
                 if isinstance(data, dict) and 'itemListElement' in data:
                     items = data['itemListElement']
-                    self.logger.info(f"Found {len(items)} listings in JSON-LD data")
-                    found_listings = True
-                    
                     for item in items:
-                        listing_url = item.get('url')
-                        if listing_url and '/detail/koop/' in listing_url:
-                            self.logger.info(f"Found listing URL: {listing_url}")
-                            yield scrapy.Request(
-                                listing_url,
-                                callback=self.parse_listing,
-                                headers=response.request.headers,
-                                meta={'dont_cache': True}
-                            )
-            except json.JSONDecodeError as e:
-                self.logger.error(f"Failed to parse JSON-LD data: {e}")
-                self.logger.error(f"Problematic JSON-LD content: {script[:200]}")
+                        url = item.get('url')
+                        if url and '/detail/koop/' in url and url not in self.processed_urls:
+                            listing_urls.add(url)
+            except json.JSONDecodeError:
                 continue
         
-        if not found_listings:
-            self.logger.warning(f"No listings found in JSON-LD data for URL: {response.url}")
-            self.logger.warning("Response headers:")
-            for header, value in response.headers.items():
-                self.logger.warning(f"{header}: {value}")
-
-        # Check if we should proceed to the next page
-        if self.max_pages is None or self.page_count < self.max_pages:
-            self.page_count += 1
-            next_page_params = self.base_params.copy()
-            next_page_params['page'] = self.page_count
-            next_page_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(next_page_params)}"
-            self.logger.info(f"Moving to next page: {next_page_url}")
+        # 2. Try HTML selectors as backup
+        html_listings = response.css('div[data-test-id="search-result-item"] a::attr(href)').getall()
+        html_listings.extend(response.css('div.search-result__header-title-col a::attr(href)').getall())
+        
+        for url in html_listings:
+            if '/detail/koop/' in url and url not in self.processed_urls:
+                full_url = response.urljoin(url)
+                listing_urls.add(full_url)
+        
+        self.logger.info(f"Found {len(listing_urls)} unique listings on page {self.page_count}")
+        
+        # Process found listings
+        for url in listing_urls:
+            self.processed_urls.add(url)
             yield scrapy.Request(
-                next_page_url,
-                callback=self.parse,
-                headers=response.request.headers,
+                url,
+                callback=self.parse_listing,
+                headers=self.headers,
                 meta={'dont_cache': True}
             )
+        
+        # Handle pagination
+        if self.max_pages is None or self.page_count < self.max_pages:
+            # Look for next page button
+            next_page = response.css('a[data-test-id="next-page-button"]::attr(href)').get()
+            if next_page:
+                self.page_count += 1
+                next_url = response.urljoin(next_page)
+                self.logger.info(f"Moving to next page: {next_url}")
+                yield scrapy.Request(
+                    next_url,
+                    callback=self.parse,
+                    headers=self.headers,
+                    meta={'dont_cache': True}
+                )
+            else:
+                # Fallback to manual page construction if next button not found
+                self.page_count += 1
+                next_page_params = self.base_params.copy()
+                next_page_params['page'] = self.page_count
+                next_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(next_page_params)}"
+                self.logger.info(f"Trying manual next page: {next_url}")
+                yield scrapy.Request(
+                    next_url,
+                    callback=self.parse,
+                    headers=self.headers,
+                    meta={'dont_cache': True}
+                )
 
     def parse_listing(self, response):
         self.logger.info(f"Parsing listing page: {response.url}")
