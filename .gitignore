@@ -41,3 +41,5 @@ env/
 test_output*.json
 *.log
 httpcache/ 
+listing_page.html
+funda_page.html
