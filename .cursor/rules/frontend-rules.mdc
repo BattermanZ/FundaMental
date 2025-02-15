@@ -17,3 +17,5 @@ globs:
   - Allow dynamic updating of both the map and charts based on the applied filters.
 - **Interaction:** 
   - Provide smooth zooming in/out on the map with the data overlay dynamically adjusting to the current view.
+
+The frontend is in a client folder.

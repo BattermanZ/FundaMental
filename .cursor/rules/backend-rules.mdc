@@ -17,3 +17,5 @@ globs:
   - Integrate robust logging (using Logrus or Zap) and performance monitoring tools to track errors and monitor system performance.
 - **Deployment & Containerization:** 
   - Containerize the backend with Docker to facilitate portability and future deployment on a server if needed.
+
+The backend is in a server folder.

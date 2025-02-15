@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./database:/app/database
+    environment:
+      - PORT=8080
+    restart: unless-stopped
+
+  frontend:
+    build: ./client
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080/api
+    restart: unless-stopped 
