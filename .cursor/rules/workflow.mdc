@@ -1,0 +1,7 @@
+---
+description: workflow
+globs: 
+---
+=== Overall Workflow ===
+- The frontend fetches data from the backend API and dynamically updates interactive maps and charts based on user interactions and filter selections.
+- The backend serves precomputed statistics and raw data quickly, ensuring a smooth user experience even with periodic database updates.

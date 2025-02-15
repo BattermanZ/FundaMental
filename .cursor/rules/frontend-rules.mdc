@@ -1,0 +1,19 @@
+---
+description: Frontend rules
+globs: 
+---
+
+- **Framework:** Use React to build a single-page application (SPA) that is easy to maintain and extend.
+- **Map Visualization:** 
+  - Integrate an interactive map using Leaflet (or optionally Mapbox GL JS) to display property data.
+  - Implement clustering and heatmap features at zoomed-out levels, with individual property pins at closer zooms.
+  - When a pin is clicked, show a detailed pop-up displaying: price, living area (sqm), number of rooms, selling date, link to the listing, price per sqm, and year built.
+- **Charts & Graphs:**
+  - Use a charting library such as Recharts to build interactive charts.
+  - Include detailed graphs such as historical price trends, distribution of apartment sizes, and correlations (e.g., price per sqm vs. year built).
+- **User Interface & Filtering:**
+  - Incorporate UI components from a library like Material UI to create dropdowns, range sliders, and date pickers.
+  - Enable users to filter data by date, price, size, and other relevant criteria.
+  - Allow dynamic updating of both the map and charts based on the applied filters.
+- **Interaction:** 
+  - Provide smooth zooming in/out on the map with the data overlay dynamically adjusting to the current view.

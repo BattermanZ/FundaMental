@@ -1,9 +1,23 @@
 from funda.data.database import FundaDB
 import pandas as pd
 from datetime import datetime
+import sqlite3
+
+def count_sold_properties():
+    db = FundaDB()
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM properties WHERE status = "sold"')
+        count = cursor.fetchone()[0]
+        return count
 
 def analyze_properties():
     db = FundaDB()
+    
+    # Get count of sold properties
+    sold_count = count_sold_properties()
+    print("\n=== Sold Properties Count ===")
+    print(f"Number of sold properties in database: {sold_count}")
     
     # Get basic stats
     stats = db.get_basic_stats()

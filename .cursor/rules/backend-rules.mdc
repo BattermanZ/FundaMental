@@ -1,0 +1,19 @@
+---
+description: backend rules
+globs: 
+---
+=== Backend ===
+- **Language & Framework:** 
+  - Use Go to develop the backend API, capitalizing on its performance, concurrency, and ease of use.
+- **Database:** 
+  - Continue using SQLite for data storage. Consider using the SpatiaLite extension if advanced geospatial indexing becomes necessary.
+- **API Design:** 
+  - Build a RESTful API using Go’s net/http package with Gorilla Mux for routing.
+  - The API should expose endpoints for raw property data as well as precomputed statistical aggregations.
+- **Data Transformation & Aggregation:** 
+  - The backend will handle all data processing, including calculations such as price per sqm, medians, and clustering for map visualization.
+  - Use scheduled tasks (via a library like robfig/cron) or database triggers to precompute and cache these statistics for fast API responses.
+- **Logging & Monitoring:** 
+  - Integrate robust logging (using Logrus or Zap) and performance monitoring tools to track errors and monitor system performance.
+- **Deployment & Containerization:** 
+  - Containerize the backend with Docker to facilitate portability and future deployment on a server if needed.
