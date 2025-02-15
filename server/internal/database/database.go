@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fundamental/server/internal/models"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -28,9 +29,25 @@ func NewDatabase(dbPath string) (*Database, error) {
 
 func (d *Database) GetAllProperties() ([]models.Property, error) {
 	rows, err := d.db.Query(`
-        SELECT id, url, street, neighborhood, property_type, city, postal_code,
-               price, year_built, living_area, num_rooms, status, 
-               listing_date, selling_date, scraped_at, created_at
+        SELECT 
+            id, 
+            url, 
+            street, 
+            neighborhood, 
+            property_type, 
+            city, 
+            postal_code,
+            price, 
+            year_built, 
+            living_area, 
+            num_rooms, 
+            status,
+            COALESCE(listing_date, '') as listing_date, 
+            COALESCE(selling_date, '') as selling_date,
+            COALESCE(scraped_at, CURRENT_TIMESTAMP) as scraped_at,
+            COALESCE(created_at, CURRENT_TIMESTAMP) as created_at,
+            latitude,
+            longitude
         FROM properties
     `)
 	if err != nil {
@@ -41,15 +58,105 @@ func (d *Database) GetAllProperties() ([]models.Property, error) {
 	var properties []models.Property
 	for rows.Next() {
 		var p models.Property
+		var street, neighborhood, propertyType, city, postalCode, status sql.NullString
+		var listingDate, sellingDate, scrapedAt, createdAt sql.NullString
+		var yearBuilt, livingArea, numRooms sql.NullInt64
+		var price sql.NullInt64
+		var latitude, longitude sql.NullFloat64
+
 		err := rows.Scan(
-			&p.ID, &p.URL, &p.Street, &p.Neighborhood, &p.PropertyType,
-			&p.City, &p.PostalCode, &p.Price, &p.YearBuilt, &p.LivingArea,
-			&p.NumRooms, &p.Status, &p.ListingDate, &p.SellingDate,
-			&p.ScrapedAt, &p.CreatedAt,
+			&p.ID,
+			&p.URL,
+			&street,
+			&neighborhood,
+			&propertyType,
+			&city,
+			&postalCode,
+			&price,
+			&yearBuilt,
+			&livingArea,
+			&numRooms,
+			&status,
+			&listingDate,
+			&sellingDate,
+			&scrapedAt,
+			&createdAt,
+			&latitude,
+			&longitude,
 		)
 		if err != nil {
 			return nil, err
 		}
+
+		// Handle nullable string fields
+		if street.Valid {
+			p.Street = street.String
+		}
+		if neighborhood.Valid {
+			p.Neighborhood = neighborhood.String
+		}
+		if propertyType.Valid {
+			p.PropertyType = propertyType.String
+		}
+		if city.Valid {
+			p.City = city.String
+		}
+		if postalCode.Valid {
+			p.PostalCode = postalCode.String
+		}
+		if status.Valid {
+			p.Status = status.String
+		}
+
+		// Handle nullable numeric fields
+		if price.Valid {
+			p.Price = int(price.Int64)
+		}
+		if yearBuilt.Valid {
+			yb := int(yearBuilt.Int64)
+			p.YearBuilt = &yb
+		}
+		if livingArea.Valid {
+			la := int(livingArea.Int64)
+			p.LivingArea = &la
+		}
+		if numRooms.Valid {
+			nr := int(numRooms.Int64)
+			p.NumRooms = &nr
+		}
+
+		// Handle nullable coordinates
+		if latitude.Valid {
+			lat := latitude.Float64
+			p.Latitude = &lat
+		}
+		if longitude.Valid {
+			lon := longitude.Float64
+			p.Longitude = &lon
+		}
+
+		// Parse dates if they're valid
+		if listingDate.Valid && listingDate.String != "" {
+			if t, err := time.Parse("2006-01-02", listingDate.String); err == nil {
+				p.ListingDate = t
+			}
+		}
+		if sellingDate.Valid && sellingDate.String != "" {
+			if t, err := time.Parse("2006-01-02", sellingDate.String); err == nil {
+				p.SellingDate = t
+			}
+		}
+		if scrapedAt.Valid && scrapedAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, scrapedAt.String); err == nil {
+				p.ScrapedAt = t
+			}
+		}
+		if createdAt.Valid && createdAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, createdAt.String); err == nil {
+				p.CreatedAt = t
+			}
+		}
+
 		properties = append(properties, p)
 	}
 	return properties, nil

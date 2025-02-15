@@ -11,14 +11,16 @@ type Property struct {
 	City         string    `json:"city"`
 	PostalCode   string    `json:"postal_code"`
 	Price        int       `json:"price"`
-	YearBuilt    int       `json:"year_built"`
-	LivingArea   int       `json:"living_area"`
-	NumRooms     int       `json:"num_rooms"`
+	YearBuilt    *int      `json:"year_built"`
+	LivingArea   *int      `json:"living_area"`
+	NumRooms     *int      `json:"num_rooms"`
 	Status       string    `json:"status"`
 	ListingDate  time.Time `json:"listing_date"`
 	SellingDate  time.Time `json:"selling_date"`
 	ScrapedAt    time.Time `json:"scraped_at"`
 	CreatedAt    time.Time `json:"created_at"`
+	Latitude     *float64  `json:"latitude"`
+	Longitude    *float64  `json:"longitude"`
 }
 
 type PropertyStats struct {

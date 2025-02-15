@@ -41,12 +41,17 @@ class FundaDB:
                     listing_date DATE,
                     selling_date DATE,
                     scraped_at TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    latitude REAL,
+                    longitude REAL
                 )
             ''')
             
             # Create index on postal_code for geographic queries
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_postal_code ON properties(postal_code)')
+            
+            # Create index on coordinates for spatial queries
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_coordinates ON properties(latitude, longitude)')
             
             conn.commit()
 
