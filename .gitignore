@@ -51,7 +51,6 @@ yarn-error.log*
 
 # Scrapy
 .scrapy/
-*.json
 
 # Virtual Environment
 venv/

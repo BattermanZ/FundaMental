@@ -1,26 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { PropertyStats as Stats } from '../types/property';
 import { api } from '../services/api';
-import { Card, CardContent, Typography, Grid } from '@material-ui/core';
-import { makeStyles } from '@material-ui/core/styles';
+import { Card, CardContent, Typography, Grid } from '@mui/material';
+import { styled } from '@mui/material/styles';
 
-const useStyles = makeStyles({
-    root: {
-        minWidth: 275,
-        margin: '20px 0',
-    },
-    title: {
-        fontSize: 14,
-        color: '#666',
-    },
-    value: {
-        marginBottom: 12,
-        fontSize: 24,
-    },
-});
+const StyledCard = styled(Card)(({ theme }) => ({
+    minWidth: 275,
+    margin: '20px 0',
+}));
+
+const TitleTypography = styled(Typography)(() => ({
+    fontSize: 14,
+    color: '#666',
+}));
+
+const ValueTypography = styled(Typography)(() => ({
+    marginBottom: 12,
+    fontSize: 24,
+}));
 
 const PropertyStats: React.FC = () => {
-    const classes = useStyles();
     const [stats, setStats] = useState<Stats | null>(null);
     const [loading, setLoading] = useState(true);
 
@@ -53,68 +52,68 @@ const PropertyStats: React.FC = () => {
     return (
         <Grid container spacing={3}>
             <Grid item xs={12} sm={6} md={4}>
-                <Card className={classes.root}>
+                <StyledCard>
                     <CardContent>
-                        <Typography className={classes.title} color="textSecondary" gutterBottom>
+                        <TitleTypography color="textSecondary" gutterBottom>
                             Total Properties
-                        </Typography>
-                        <Typography className={classes.value} variant="h5" component="h2">
+                        </TitleTypography>
+                        <ValueTypography variant="h5">
                             {stats.total_properties}
-                        </Typography>
+                        </ValueTypography>
                     </CardContent>
-                </Card>
+                </StyledCard>
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-                <Card className={classes.root}>
+                <StyledCard>
                     <CardContent>
-                        <Typography className={classes.title} color="textSecondary" gutterBottom>
+                        <TitleTypography color="textSecondary" gutterBottom>
                             Average Price
-                        </Typography>
-                        <Typography className={classes.value} variant="h5" component="h2">
+                        </TitleTypography>
+                        <ValueTypography variant="h5">
                             {formatPrice(stats.average_price)}
-                        </Typography>
+                        </ValueTypography>
                     </CardContent>
-                </Card>
+                </StyledCard>
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-                <Card className={classes.root}>
+                <StyledCard>
                     <CardContent>
-                        <Typography className={classes.title} color="textSecondary" gutterBottom>
+                        <TitleTypography color="textSecondary" gutterBottom>
                             Average Price per m²
-                        </Typography>
-                        <Typography className={classes.value} variant="h5" component="h2">
+                        </TitleTypography>
+                        <ValueTypography variant="h5">
                             {formatPrice(stats.price_per_sqm)}/m²
-                        </Typography>
+                        </ValueTypography>
                     </CardContent>
-                </Card>
+                </StyledCard>
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-                <Card className={classes.root}>
+                <StyledCard>
                     <CardContent>
-                        <Typography className={classes.title} color="textSecondary" gutterBottom>
+                        <TitleTypography color="textSecondary" gutterBottom>
                             Total Sold
-                        </Typography>
-                        <Typography className={classes.value} variant="h5" component="h2">
+                        </TitleTypography>
+                        <ValueTypography variant="h5">
                             {stats.total_sold}
-                        </Typography>
+                        </ValueTypography>
                     </CardContent>
-                </Card>
+                </StyledCard>
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-                <Card className={classes.root}>
+                <StyledCard>
                     <CardContent>
-                        <Typography className={classes.title} color="textSecondary" gutterBottom>
+                        <TitleTypography color="textSecondary" gutterBottom>
                             Average Days to Sell
-                        </Typography>
-                        <Typography className={classes.value} variant="h5" component="h2">
+                        </TitleTypography>
+                        <ValueTypography variant="h5">
                             {stats.avg_days_to_sell.toFixed(1)} days
-                        </Typography>
+                        </ValueTypography>
                     </CardContent>
-                </Card>
+                </StyledCard>
             </Grid>
         </Grid>
     );
