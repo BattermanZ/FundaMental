@@ -244,6 +244,56 @@ func (d *Database) Close() error {
 	return d.db.Close()
 }
 
+func (d *Database) RunMigrations() error {
+	// Add latitude and longitude columns if they don't exist
+	_, err := d.db.Exec(`
+		ALTER TABLE properties 
+		ADD COLUMN latitude REAL;
+	`)
+	if err != nil && err.Error() != "duplicate column name: latitude" {
+		return err
+	}
+
+	_, err = d.db.Exec(`
+		ALTER TABLE properties 
+		ADD COLUMN longitude REAL;
+	`)
+	if err != nil && err.Error() != "duplicate column name: longitude" {
+		return err
+	}
+
+	// Add geocoding_attempted column
+	_, err = d.db.Exec(`
+		ALTER TABLE properties 
+		ADD COLUMN geocoding_attempted BOOLEAN DEFAULT 0;
+	`)
+	if err != nil && err.Error() != "duplicate column name: geocoding_attempted" {
+		return err
+	}
+
+	// Mark properties that already have coordinates as attempted
+	_, err = d.db.Exec(`
+		UPDATE properties 
+		SET geocoding_attempted = 1 
+		WHERE latitude IS NOT NULL 
+		AND longitude IS NOT NULL;
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to mark existing coordinates as attempted: %v", err)
+	}
+
+	// Create spatial index on coordinates
+	_, err = d.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_properties_coordinates 
+		ON properties(latitude, longitude);
+	`)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error {
 	// Get total count of properties needing geocoding
 	var totalCount int
@@ -251,6 +301,7 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 		SELECT COUNT(*) 
 		FROM properties 
 		WHERE (latitude IS NULL OR longitude IS NULL)
+		AND geocoding_attempted = 0
 		AND street IS NOT NULL 
 		AND postal_code IS NOT NULL 
 		AND city IS NOT NULL
@@ -266,7 +317,7 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 
 	fmt.Printf("Found %d properties that need geocoding\n", totalCount)
 
-	var updated, failed int
+	var processed, failed int
 	offset := 0
 	batchSize := 10
 
@@ -281,6 +332,7 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 			SELECT id, street, postal_code, city 
 			FROM properties 
 			WHERE (latitude IS NULL OR longitude IS NULL)
+			AND geocoding_attempted = 0
 			AND street IS NOT NULL 
 			AND postal_code IS NOT NULL 
 			AND city IS NOT NULL
@@ -293,7 +345,7 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 
 		stmt, err := tx.Prepare(`
 			UPDATE properties 
-			SET latitude = ?, longitude = ? 
+			SET latitude = ?, longitude = ?, geocoding_attempted = 1
 			WHERE id = ?
 		`)
 		if err != nil {
@@ -302,13 +354,26 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 			return fmt.Errorf("failed to prepare statement: %v", err)
 		}
 
-		var batchUpdated int
+		failedStmt, err := tx.Prepare(`
+			UPDATE properties 
+			SET geocoding_attempted = 1
+			WHERE id = ?
+		`)
+		if err != nil {
+			rows.Close()
+			stmt.Close()
+			tx.Rollback()
+			return fmt.Errorf("failed to prepare failed statement: %v", err)
+		}
+
+		var batchProcessed int
 		for rows.Next() {
 			var id int64
 			var street, postalCode, city string
 			if err := rows.Scan(&id, &street, &postalCode, &city); err != nil {
 				rows.Close()
 				stmt.Close()
+				failedStmt.Close()
 				tx.Rollback()
 				return fmt.Errorf("failed to scan row: %v", err)
 			}
@@ -316,7 +381,17 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 			lat, lon, err := geocoder.GeocodeAddress(street, postalCode, city)
 			if err != nil {
 				fmt.Printf("Failed to geocode %s, %s, %s: %v\n", street, postalCode, city, err)
+				// Mark as attempted even if geocoding failed
+				_, err = failedStmt.Exec(id)
+				if err != nil {
+					rows.Close()
+					stmt.Close()
+					failedStmt.Close()
+					tx.Rollback()
+					return fmt.Errorf("failed to mark geocoding attempt: %v", err)
+				}
 				failed++
+				batchProcessed++
 				continue
 			}
 
@@ -324,20 +399,22 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 			if err != nil {
 				rows.Close()
 				stmt.Close()
+				failedStmt.Close()
 				tx.Rollback()
 				return fmt.Errorf("failed to update coordinates: %v", err)
 			}
 
-			updated++
-			batchUpdated++
+			processed++
+			batchProcessed++
 
 			// Print progress
-			fmt.Printf("Progress: %d/%d properties geocoded (%.1f%%), %d failed\n",
-				updated, totalCount, float64(updated)/float64(totalCount)*100, failed)
+			fmt.Printf("Progress: %d/%d properties processed (%.1f%%), %d failed\n",
+				processed+failed, totalCount, float64(processed+failed)/float64(totalCount)*100, failed)
 		}
 
 		rows.Close()
 		stmt.Close()
+		failedStmt.Close()
 
 		// Commit the batch
 		if err := tx.Commit(); err != nil {
@@ -345,12 +422,12 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 		}
 
 		// Move to next batch
-		offset += batchUpdated
+		offset += batchProcessed
 	}
 
 	// Log final stats
-	fmt.Printf("Geocoding completed: %d/%d properties geocoded (%.1f%%), %d failed\n",
-		updated, totalCount, float64(updated)/float64(totalCount)*100, failed)
+	fmt.Printf("Geocoding completed: %d/%d properties processed (%.1f%%), %d failed\n",
+		processed+failed, totalCount, float64(processed+failed)/float64(totalCount)*100, failed)
 
 	return nil
 }
