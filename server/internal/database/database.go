@@ -260,90 +260,92 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 	}
 
 	if totalCount == 0 {
+		fmt.Println("No properties need geocoding")
 		return nil
 	}
 
-	// Start a transaction
-	tx, err := d.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	rows, err := tx.Query(`
-		SELECT id, street, postal_code, city 
-		FROM properties 
-		WHERE (latitude IS NULL OR longitude IS NULL)
-		AND street IS NOT NULL 
-		AND postal_code IS NOT NULL 
-		AND city IS NOT NULL
-	`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
+	fmt.Printf("Found %d properties that need geocoding\n", totalCount)
 
 	var updated, failed int
-	stmt, err := tx.Prepare(`
-		UPDATE properties 
-		SET latitude = ?, longitude = ? 
-		WHERE id = ?
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
+	offset := 0
+	batchSize := 10
 
-	for rows.Next() {
-		var id int64
-		var street, postalCode, city string
-		if err := rows.Scan(&id, &street, &postalCode, &city); err != nil {
-			return err
-		}
-
-		lat, lon, err := geocoder.GeocodeAddress(street, postalCode, city)
+	for offset < totalCount {
+		// Start a new transaction for each batch
+		tx, err := d.db.Begin()
 		if err != nil {
-			failed++
-			continue
+			return fmt.Errorf("failed to begin transaction: %v", err)
 		}
 
-		_, err = stmt.Exec(lat, lon, id)
+		rows, err := tx.Query(`
+			SELECT id, street, postal_code, city 
+			FROM properties 
+			WHERE (latitude IS NULL OR longitude IS NULL)
+			AND street IS NOT NULL 
+			AND postal_code IS NOT NULL 
+			AND city IS NOT NULL
+			LIMIT ? OFFSET ?
+		`, batchSize, offset)
 		if err != nil {
-			return err
+			tx.Rollback()
+			return fmt.Errorf("failed to query properties: %v", err)
 		}
-		updated++
 
-		// Log progress
-		if updated%10 == 0 {
+		stmt, err := tx.Prepare(`
+			UPDATE properties 
+			SET latitude = ?, longitude = ? 
+			WHERE id = ?
+		`)
+		if err != nil {
+			rows.Close()
+			tx.Rollback()
+			return fmt.Errorf("failed to prepare statement: %v", err)
+		}
+
+		var batchUpdated int
+		for rows.Next() {
+			var id int64
+			var street, postalCode, city string
+			if err := rows.Scan(&id, &street, &postalCode, &city); err != nil {
+				rows.Close()
+				stmt.Close()
+				tx.Rollback()
+				return fmt.Errorf("failed to scan row: %v", err)
+			}
+
+			lat, lon, err := geocoder.GeocodeAddress(street, postalCode, city)
+			if err != nil {
+				fmt.Printf("Failed to geocode %s, %s, %s: %v\n", street, postalCode, city, err)
+				failed++
+				continue
+			}
+
+			_, err = stmt.Exec(lat, lon, id)
+			if err != nil {
+				rows.Close()
+				stmt.Close()
+				tx.Rollback()
+				return fmt.Errorf("failed to update coordinates: %v", err)
+			}
+
+			updated++
+			batchUpdated++
+
+			// Print progress
 			fmt.Printf("Progress: %d/%d properties geocoded (%.1f%%), %d failed\n",
 				updated, totalCount, float64(updated)/float64(totalCount)*100, failed)
 		}
 
-		// Commit every 10 updates to avoid long-running transactions
-		if updated%10 == 0 {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			// Start a new transaction
-			tx, err = d.db.Begin()
-			if err != nil {
-				return err
-			}
-			// Prepare the statement again for the new transaction
-			stmt, err = tx.Prepare(`
-				UPDATE properties 
-				SET latitude = ?, longitude = ? 
-				WHERE id = ?
-			`)
-			if err != nil {
-				return err
-			}
-		}
-	}
+		rows.Close()
+		stmt.Close()
 
-	// Commit any remaining updates
-	if err := tx.Commit(); err != nil {
-		return err
+		// Commit the batch
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit transaction: %v", err)
+		}
+
+		// Move to next batch
+		offset += batchUpdated
 	}
 
 	// Log final stats
