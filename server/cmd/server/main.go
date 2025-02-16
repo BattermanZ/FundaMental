@@ -4,11 +4,11 @@ import (
 	"fundamental/server/internal/api"
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
-	"net/http"
 	"os"
 	"path/filepath"
 
-	"github.com/gorilla/mux"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
@@ -44,32 +44,31 @@ func main() {
 	cacheDir := filepath.Join(os.TempDir(), "fundamental", "geocode_cache")
 	geocoder := geocoding.NewGeocoder(logger, cacheDir)
 
-	// Run initial geocoding for properties without coordinates
-	logger.Info("Starting initial geocoding of properties without coordinates...")
-	if err := db.UpdateMissingCoordinates(geocoder); err != nil {
-		logger.WithError(err).Error("Failed to update coordinates")
-	}
-
-	// Initialize handler
-	handler := api.NewHandler(db, logger)
+	// Start geocoding in a background goroutine
+	go func() {
+		logger.Info("Starting initial geocoding of properties without coordinates in background...")
+		if err := db.UpdateMissingCoordinates(geocoder); err != nil {
+			logger.WithError(err).Error("Failed to update coordinates")
+		}
+	}()
 
 	// Initialize router
-	router := mux.NewRouter()
+	router := gin.Default()
 
-	// Apply CORS middleware
-	router.Use(handler.EnableCORS)
+	// Configure CORS
+	config := cors.DefaultConfig()
+	config.AllowOrigins = []string{"http://localhost:3004"}
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	config.AllowHeaders = []string{"Origin", "Content-Type"}
+	router.Use(cors.New(config))
 
-	// Define routes
-	router.HandleFunc("/api/properties", handler.GetAllProperties).Methods("GET", "OPTIONS")
-	router.HandleFunc("/api/stats", handler.GetPropertyStats).Methods("GET", "OPTIONS")
-	router.HandleFunc("/api/areas/{postal_prefix}", handler.GetAreaStats).Methods("GET", "OPTIONS")
-	router.HandleFunc("/api/recent-sales", handler.GetRecentSales).Methods("GET", "OPTIONS")
-	router.HandleFunc("/api/update-coordinates", handler.UpdateCoordinates).Methods("POST", "OPTIONS")
+	// Setup API routes
+	api.SetupRoutes(router, db)
 
 	// Use port 5250
 	const port = "5250"
 	logger.Infof("Starting server on port %s", port)
-	if err := http.ListenAndServe(":"+port, router); err != nil {
+	if err := router.Run(":" + port); err != nil {
 		logger.WithError(err).Fatal("Server failed to start")
 	}
 }

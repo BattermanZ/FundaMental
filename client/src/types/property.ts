@@ -15,6 +15,8 @@ export interface Property {
     selling_date: string;
     scraped_at: string;
     created_at: string;
+    latitude: number | null;
+    longitude: number | null;
 }
 
 export interface PropertyStats {

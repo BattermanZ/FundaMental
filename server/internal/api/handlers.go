@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
 	"net/http"
@@ -9,7 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
@@ -20,6 +19,12 @@ type Handler struct {
 }
 
 func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
+	if logger == nil {
+		logger = logrus.New()
+		logger.SetFormatter(&logrus.JSONFormatter{})
+		logger.SetOutput(os.Stdout)
+	}
+
 	cacheDir := filepath.Join(os.TempDir(), "fundamental", "geocode_cache")
 	return &Handler{
 		db:       db,
@@ -28,81 +33,67 @@ func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 	}
 }
 
-func (h *Handler) GetAllProperties(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetAllProperties(c *gin.Context) {
 	properties, err := h.db.GetAllProperties()
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get properties")
-		http.Error(w, "Failed to get properties", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get properties"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(properties)
+	c.JSON(http.StatusOK, properties)
 }
 
-func (h *Handler) GetPropertyStats(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetPropertyStats(c *gin.Context) {
 	stats, err := h.db.GetPropertyStats()
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get property stats")
-		http.Error(w, "Failed to get property stats", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get property stats"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	c.JSON(http.StatusOK, stats)
 }
 
-func (h *Handler) GetAreaStats(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	postalPrefix := vars["postal_prefix"]
+func (h *Handler) GetAreaStats(c *gin.Context) {
+	postalPrefix := c.Param("postal_prefix")
 
 	stats, err := h.db.GetAreaStats(postalPrefix)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get area stats")
-		http.Error(w, "Failed to get area stats", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get area stats"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	c.JSON(http.StatusOK, stats)
 }
 
-func (h *Handler) GetRecentSales(w http.ResponseWriter, r *http.Request) {
-	limitStr := r.URL.Query().Get("limit")
-	limit := 10 // default limit
-	if limitStr != "" {
-		parsedLimit, err := strconv.Atoi(limitStr)
-		if err == nil && parsedLimit > 0 {
-			limit = parsedLimit
-		}
+func (h *Handler) GetRecentSales(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "10")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 10
 	}
 
 	sales, err := h.db.GetRecentSales(limit)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get recent sales")
-		http.Error(w, "Failed to get recent sales", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get recent sales"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sales)
+	c.JSON(http.StatusOK, sales)
 }
 
-func (h *Handler) UpdateCoordinates(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+func (h *Handler) UpdateCoordinates(c *gin.Context) {
 	err := h.db.UpdateMissingCoordinates(h.geocoder)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to update coordinates")
-		http.Error(w, "Failed to update coordinates", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update coordinates"})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	c.JSON(http.StatusOK, gin.H{
 		"status": "Coordinates update process started",
 	})
 }
