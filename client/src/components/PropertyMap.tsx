@@ -9,6 +9,9 @@ import { api } from '../services/api';
 import { Icon, LatLngTuple } from 'leaflet';
 import { CircularProgress, Typography, Box, Button, FormControl, InputLabel, Select, MenuItem, Slider, Grid } from '@mui/material';
 import MarkerClusterGroup from 'react-leaflet-cluster';
+import { GeoJSON, Tooltip } from 'react-leaflet';
+import { Feature, Polygon } from 'geojson';
+import * as d3 from 'd3';
 
 // Fix for default marker icon
 delete (Icon.Default.prototype as any)._getIconUrl;
@@ -272,7 +275,7 @@ const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange }) => {
                             ))}
                         </MarkerClusterGroup>
                     ) : (
-                        <HeatmapLayer properties={filteredProperties} />
+                        <PriceLayer properties={filteredProperties} />
                     )}
                 </MapContainer>
             )}
@@ -280,34 +283,222 @@ const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange }) => {
     );
 };
 
-// Heatmap layer component
-const HeatmapLayer: React.FC<{ properties: Property[] }> = ({ properties }) => {
+const PriceLayer: React.FC<{ properties: Property[] }> = ({ properties }) => {
     const map = useMap();
+    const [priceRange, setPriceRange] = useState<{ min: number; max: number } | null>(null);
+    const [voronoiLayer, setVoronoiLayer] = useState<any>(null);
 
     useEffect(() => {
         if (!properties.length) return;
 
-        const points = properties.map(p => [
-            p.latitude!,
-            p.longitude!,
-            p.price / 1000000 // Normalize price for heat intensity
-        ]);
+        // Calculate price range using all properties with valid data
+        const validPrices = properties
+            .filter(p => p.price && p.living_area && p.living_area > 0)
+            .map(p => p.price / p.living_area);
 
-        const heat = (window as any).L.heatLayer(points, {
-            radius: 25,
-            blur: 15,
-            maxZoom: 10,
-            max: 2.0, // Maximum price in millions for intensity scaling
-            gradient: {0.4: 'blue', 0.65: 'lime', 0.85: 'yellow', 1: 'red'}
-        });
+        if (validPrices.length === 0) return;
 
-        heat.addTo(map);
+        const sortedPrices = [...validPrices].sort((a, b) => a - b);
+        const p10 = sortedPrices[Math.floor(sortedPrices.length * 0.1)];
+        const p90 = sortedPrices[Math.floor(sortedPrices.length * 0.9)];
+
+        setPriceRange({ min: p10, max: p90 });
+
+        // Remove existing layer
+        if (voronoiLayer) {
+            voronoiLayer.remove();
+        }
+
+        // Function to get color based on price
+        const getColor = (value: number | null) => {
+            if (!value || value <= 0 || !p10 || !p90) return 'transparent';
+            
+            // Normalize the value between p10 and p90
+            const normalized = (value - p10) / (p90 - p10);
+            
+            // Ensure the normalized value is between 0 and 1
+            const capped = Math.min(Math.max(normalized, 0), 1);
+            
+            // Color scale from green to red
+            if (capped <= 0.2) return '#00ff00';  // Green
+            if (capped <= 0.4) return '#80ff00';  // Light green
+            if (capped <= 0.6) return '#ffff00';  // Yellow
+            if (capped <= 0.8) return '#ff8000';  // Orange
+            return '#ff0000';                      // Red
+        };
+
+        // Create a new SVG layer
+        const layer = (window as any).L.svg().addTo(map);
+        const svg = d3.select(layer._container);
+
+        // Function to update the Voronoi diagram
+        const updateVoronoi = () => {
+            // Clear existing paths
+            svg.selectAll('path').remove();
+
+            // Get current bounds and zoom level
+            const bounds = map.getBounds();
+            const zoom = map.getZoom();
+            const width = map.getSize().x;
+            const height = map.getSize().y;
+
+            // Filter properties within current bounds and add buffer
+            const bufferSize = 0.1;
+            const extendedBounds = bounds.pad(bufferSize);
+            const visibleProperties = properties.filter(p => {
+                if (!p.latitude || !p.longitude || !p.price || !p.living_area || p.living_area <= 0) return false;
+                return extendedBounds.contains([p.latitude, p.longitude]);
+            });
+
+            // Cluster points based on zoom level
+            let points;
+            if (zoom <= 12) {
+                // Group by first 4 digits of postal code for zoomed out view
+                const clusters = visibleProperties.reduce((acc: { [key: string]: any }, prop) => {
+                    const postal = prop.postal_code.substring(0, 4);
+                    if (!acc[postal]) {
+                        acc[postal] = {
+                            totalPrice: 0,
+                            totalArea: 0,
+                            count: 0,
+                            lat: 0,
+                            lng: 0
+                        };
+                    }
+                    acc[postal].totalPrice += prop.price;
+                    acc[postal].totalArea += prop.living_area;
+                    acc[postal].lat += prop.latitude;
+                    acc[postal].lng += prop.longitude;
+                    acc[postal].count += 1;
+                    return acc;
+                }, {});
+
+                points = Object.entries(clusters)
+                    .filter(([_, data]) => data.count > 0 && data.totalArea > 0)
+                    .map(([postal, data]) => ({
+                        lat: data.lat / data.count,
+                        lng: data.lng / data.count,
+                        pricePerSqm: data.totalPrice / data.totalArea,
+                        count: data.count,
+                        postal
+                    }));
+            } else {
+                points = visibleProperties.map(prop => ({
+                    lat: prop.latitude!,
+                    lng: prop.longitude!,
+                    pricePerSqm: prop.price / prop.living_area!,
+                    count: 1,
+                    postal: prop.postal_code
+                }));
+            }
+
+            if (points.length === 0) return;
+
+            // Add boundary points
+            const boundaryPoints = [
+                { lat: bounds.getNorth(), lng: bounds.getWest(), pricePerSqm: null, count: 0, postal: '' },
+                { lat: bounds.getNorth(), lng: bounds.getEast(), pricePerSqm: null, count: 0, postal: '' },
+                { lat: bounds.getSouth(), lng: bounds.getWest(), pricePerSqm: null, count: 0, postal: '' },
+                { lat: bounds.getSouth(), lng: bounds.getEast(), pricePerSqm: null, count: 0, postal: '' }
+            ];
+            points = [...points, ...boundaryPoints];
+
+            // Create and draw Voronoi diagram
+            const voronoi = d3.Delaunay
+                .from(points, d => map.latLngToLayerPoint([d.lat, d.lng]).x, d => map.latLngToLayerPoint([d.lat, d.lng]).y)
+                .voronoi([0, 0, width, height]);
+
+            // Draw polygons
+            svg.selectAll('path')
+                .data(points)
+                .enter()
+                .append('path')
+                .attr('d', (d, i) => voronoi.renderCell(i))
+                .attr('fill', d => getColor(d.pricePerSqm))
+                .attr('fill-opacity', 0.5)
+                .attr('stroke', 'white')
+                .attr('stroke-width', 1)
+                .attr('stroke-opacity', 0.8)
+                .style('pointer-events', d => d.pricePerSqm === null ? 'none' : 'auto')
+                .on('mouseover', (event, d) => {
+                    if (d.pricePerSqm === null) return;
+                    const tooltip = (window as any).L.tooltip({
+                        permanent: false,
+                        direction: 'top',
+                        className: 'price-tooltip'
+                    })
+                    .setLatLng([d.lat, d.lng])
+                    .setContent(`
+                        <strong>Postal Area: ${d.postal}</strong><br/>
+                        Average Price/m²: €${Math.round(d.pricePerSqm).toLocaleString()}<br/>
+                        Properties: ${d.count}
+                    `)
+                    .addTo(map);
+                    
+                    (event.target as any).tooltip = tooltip;
+                })
+                .on('mouseout', (event) => {
+                    const tooltip = (event.target as any).tooltip;
+                    if (tooltip) {
+                        tooltip.remove();
+                        (event.target as any).tooltip = null;
+                    }
+                });
+        };
+
+        // Initial update
+        updateVoronoi();
+
+        // Update on map movement and zoom
+        map.on('moveend', updateVoronoi);
+        map.on('zoomend', updateVoronoi);
+        map.on('move', updateVoronoi); // Add update during pan
+        
+        setVoronoiLayer(layer);
+
         return () => {
-            map.removeLayer(heat);
+            map.off('moveend', updateVoronoi);
+            map.off('zoomend', updateVoronoi);
+            map.off('move', updateVoronoi);
+            if (voronoiLayer) {
+                voronoiLayer.remove();
+            }
         };
     }, [map, properties]);
 
-    return null;
+    return priceRange ? <PriceLegend min={priceRange.min} max={priceRange.max} /> : null;
+};
+
+const PriceLegend: React.FC<{ min: number; max: number }> = ({ min, max }) => {
+    const steps = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0];
+    const colors = ['#00ff00', '#80ff00', '#ffff00', '#ff8000', '#ff0000'];
+    const values = steps.map(step => Math.round(min + (max - min) * step));
+
+    return (
+        <div style={{
+            position: 'absolute',
+            bottom: '20px',
+            right: '20px',
+            backgroundColor: 'white',
+            padding: '10px',
+            borderRadius: '5px',
+            boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+            zIndex: 1000
+        }}>
+            <div style={{ marginBottom: '5px', fontWeight: 'bold' }}>Average Price per m² by Area</div>
+            {colors.map((color, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', margin: '2px 0' }}>
+                    <div style={{
+                        width: '20px',
+                        height: '20px',
+                        backgroundColor: color,
+                        marginRight: '5px'
+                    }} />
+                    <span>€{values[i].toLocaleString()} - €{values[i + 1].toLocaleString()}</span>
+                </div>
+            ))}
+        </div>
+    );
 };
 
 export default PropertyMap; 
