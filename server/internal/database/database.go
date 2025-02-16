@@ -370,11 +370,9 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 	fmt.Printf("Found %d properties that need geocoding\n", totalCount)
 
 	var processed, failed int
-	offset := 0
 	batchSize := 10
-	consecutiveEmptyBatches := 0
-	maxEmptyBatches := 3 // Safety limit to prevent infinite loops
 
+	// Process properties in batches
 	for processed+failed < totalCount {
 		// Start a new transaction for each batch
 		tx, err := d.db.Begin()
@@ -390,8 +388,8 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 			AND street IS NOT NULL 
 			AND postal_code IS NOT NULL 
 			AND city IS NOT NULL
-			LIMIT ? OFFSET ?
-		`, batchSize, offset)
+			LIMIT ?
+		`, batchSize)
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to query properties: %v", err)
@@ -421,9 +419,7 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 		}
 
 		var batchProcessed int
-		hasRows := false
 		for rows.Next() {
-			hasRows = true
 			var id int64
 			var street, postalCode, city string
 			if err := rows.Scan(&id, &street, &postalCode, &city); err != nil {
@@ -477,25 +473,10 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 			return fmt.Errorf("failed to commit transaction: %v", err)
 		}
 
-		// Check if we got any rows in this batch
-		if !hasRows {
-			consecutiveEmptyBatches++
-			if consecutiveEmptyBatches >= maxEmptyBatches {
-				// If we've hit too many empty batches, something might be wrong
-				return fmt.Errorf("stopped after %d consecutive empty batches, processed %d/%d properties",
-					maxEmptyBatches, processed+failed, totalCount)
-			}
-		} else {
-			consecutiveEmptyBatches = 0
-		}
-
-		// Move to next batch, but only if we processed some items
-		if batchProcessed > 0 {
-			offset += batchProcessed
-		} else {
-			// If we didn't process any items but the query returned rows,
-			// increment by batch size to avoid getting stuck
-			offset += batchSize
+		// If we didn't process any items in this batch, something might be wrong
+		if batchProcessed == 0 {
+			return fmt.Errorf("no properties processed in batch, possible data inconsistency. Total processed: %d/%d",
+				processed+failed, totalCount)
 		}
 	}
 
