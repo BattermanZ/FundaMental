@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Property, PropertyStats, AreaStats } from '../types/property';
+import { Property, PropertyStats, AreaStats, DateRange } from '../types/property';
 
 const API_BASE_URL = 'http://localhost:5250/api';
 
@@ -13,24 +13,33 @@ const axiosInstance = axios.create({
 });
 
 export const api = {
-    getAllProperties: async (): Promise<Property[]> => {
-        const response = await axiosInstance.get('/properties');
+    getAllProperties: async (dateRange: DateRange): Promise<Property[]> => {
+        const response = await axiosInstance.get('/properties', {
+            params: dateRange
+        });
         return response.data;
     },
 
-    getPropertyStats: async (): Promise<PropertyStats> => {
-        const response = await axiosInstance.get('/stats');
+    getPropertyStats: async (dateRange: DateRange): Promise<PropertyStats> => {
+        const response = await axiosInstance.get('/stats', {
+            params: dateRange
+        });
         return response.data;
     },
 
-    getAreaStats: async (postalPrefix: string): Promise<AreaStats> => {
-        const response = await axiosInstance.get(`/areas/${postalPrefix}`);
+    getAreaStats: async (postalPrefix: string, dateRange: DateRange): Promise<AreaStats> => {
+        const response = await axiosInstance.get(`/areas/${postalPrefix}`, {
+            params: dateRange
+        });
         return response.data;
     },
 
-    getRecentSales: async (limit: number = 10): Promise<Property[]> => {
+    getRecentSales: async (limit: number = 10, dateRange: DateRange): Promise<Property[]> => {
         const response = await axiosInstance.get('/recent-sales', {
-            params: { limit }
+            params: { 
+                limit,
+                ...dateRange
+            }
         });
         return response.data;
     },

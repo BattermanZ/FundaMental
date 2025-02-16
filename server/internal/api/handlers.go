@@ -18,6 +18,11 @@ type Handler struct {
 	geocoder *geocoding.Geocoder
 }
 
+type DateRange struct {
+	StartDate string `form:"startDate"`
+	EndDate   string `form:"endDate"`
+}
+
 func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 	if logger == nil {
 		logger = logrus.New()
@@ -34,7 +39,12 @@ func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 }
 
 func (h *Handler) GetAllProperties(c *gin.Context) {
-	properties, err := h.db.GetAllProperties()
+	var dateRange DateRange
+	if err := c.ShouldBindQuery(&dateRange); err != nil {
+		h.logger.WithError(err).Error("Failed to parse date range")
+	}
+
+	properties, err := h.db.GetAllProperties(dateRange.StartDate, dateRange.EndDate)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get properties")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get properties"})
@@ -45,7 +55,12 @@ func (h *Handler) GetAllProperties(c *gin.Context) {
 }
 
 func (h *Handler) GetPropertyStats(c *gin.Context) {
-	stats, err := h.db.GetPropertyStats()
+	var dateRange DateRange
+	if err := c.ShouldBindQuery(&dateRange); err != nil {
+		h.logger.WithError(err).Error("Failed to parse date range")
+	}
+
+	stats, err := h.db.GetPropertyStats(dateRange.StartDate, dateRange.EndDate)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get property stats")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get property stats"})
@@ -57,8 +72,12 @@ func (h *Handler) GetPropertyStats(c *gin.Context) {
 
 func (h *Handler) GetAreaStats(c *gin.Context) {
 	postalPrefix := c.Param("postal_prefix")
+	var dateRange DateRange
+	if err := c.ShouldBindQuery(&dateRange); err != nil {
+		h.logger.WithError(err).Error("Failed to parse date range")
+	}
 
-	stats, err := h.db.GetAreaStats(postalPrefix)
+	stats, err := h.db.GetAreaStats(postalPrefix, dateRange.StartDate, dateRange.EndDate)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get area stats")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get area stats"})
@@ -75,7 +94,12 @@ func (h *Handler) GetRecentSales(c *gin.Context) {
 		limit = 10
 	}
 
-	sales, err := h.db.GetRecentSales(limit)
+	var dateRange DateRange
+	if err := c.ShouldBindQuery(&dateRange); err != nil {
+		h.logger.WithError(err).Error("Failed to parse date range")
+	}
+
+	sales, err := h.db.GetRecentSales(limit, dateRange.StartDate, dateRange.EndDate)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get recent sales")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get recent sales"})
@@ -95,21 +119,5 @@ func (h *Handler) UpdateCoordinates(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": "Coordinates update process started",
-	})
-}
-
-// CORS middleware
-func (h *Handler) EnableCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
 	})
 }

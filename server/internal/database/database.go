@@ -29,8 +29,8 @@ func NewDatabase(dbPath string) (*Database, error) {
 	return &Database{db: db}, nil
 }
 
-func (d *Database) GetAllProperties() ([]models.Property, error) {
-	rows, err := d.db.Query(`
+func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Property, error) {
+	query := `
         SELECT 
             id, 
             url, 
@@ -51,7 +51,20 @@ func (d *Database) GetAllProperties() ([]models.Property, error) {
             latitude,
             longitude
         FROM properties
-    `)
+        WHERE 1=1
+    `
+	var args []interface{}
+
+	if startDate != "" {
+		query += " AND (listing_date >= ? OR selling_date >= ?)"
+		args = append(args, startDate, startDate)
+	}
+	if endDate != "" {
+		query += " AND (listing_date <= ? OR selling_date <= ?)"
+		args = append(args, endDate, endDate)
+	}
+
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -164,9 +177,8 @@ func (d *Database) GetAllProperties() ([]models.Property, error) {
 	return properties, nil
 }
 
-func (d *Database) GetPropertyStats() (models.PropertyStats, error) {
-	var stats models.PropertyStats
-	err := d.db.QueryRow(`
+func (d *Database) GetPropertyStats(startDate, endDate string) (models.PropertyStats, error) {
+	query := `
         SELECT 
             COUNT(*) as total_properties,
             AVG(price) as average_price,
@@ -177,8 +189,21 @@ func (d *Database) GetPropertyStats() (models.PropertyStats, error) {
             COUNT(CASE WHEN status = 'sold' THEN 1 END) as total_sold,
             AVG(CAST(price AS FLOAT) / NULLIF(living_area, 0)) as price_per_sqm
         FROM properties
-        WHERE price > 0
-    `).Scan(
+        WHERE 1=1
+    `
+	var args []interface{}
+
+	if startDate != "" {
+		query += " AND (listing_date >= ? OR selling_date >= ?)"
+		args = append(args, startDate, startDate)
+	}
+	if endDate != "" {
+		query += " AND (listing_date <= ? OR selling_date <= ?)"
+		args = append(args, endDate, endDate)
+	}
+
+	var stats models.PropertyStats
+	err := d.db.QueryRow(query, args...).Scan(
 		&stats.TotalProperties,
 		&stats.AveragePrice,
 		&stats.AvgDaysToSell,
@@ -188,9 +213,8 @@ func (d *Database) GetPropertyStats() (models.PropertyStats, error) {
 	return stats, err
 }
 
-func (d *Database) GetAreaStats(postalPrefix string) (models.AreaStats, error) {
-	var stats models.AreaStats
-	err := d.db.QueryRow(`
+func (d *Database) GetAreaStats(postalPrefix string, startDate, endDate string) (models.AreaStats, error) {
+	query := `
         SELECT 
             postal_code,
             COUNT(*) as property_count,
@@ -198,8 +222,23 @@ func (d *Database) GetAreaStats(postalPrefix string) (models.AreaStats, error) {
             AVG(CAST(price AS FLOAT) / NULLIF(living_area, 0)) as avg_price_per_sqm
         FROM properties
         WHERE postal_code LIKE ? || '%'
-        GROUP BY substr(postal_code, 1, 4)
-    `, postalPrefix).Scan(
+    `
+	var args []interface{}
+	args = append(args, postalPrefix)
+
+	if startDate != "" {
+		query += " AND (listing_date >= ? OR selling_date >= ?)"
+		args = append(args, startDate, startDate)
+	}
+	if endDate != "" {
+		query += " AND (listing_date <= ? OR selling_date <= ?)"
+		args = append(args, endDate, endDate)
+	}
+
+	query += " GROUP BY substr(postal_code, 1, 4)"
+
+	var stats models.AreaStats
+	err := d.db.QueryRow(query, args...).Scan(
 		&stats.PostalCode,
 		&stats.PropertyCount,
 		&stats.AveragePrice,
@@ -208,16 +247,29 @@ func (d *Database) GetAreaStats(postalPrefix string) (models.AreaStats, error) {
 	return stats, err
 }
 
-func (d *Database) GetRecentSales(limit int) ([]models.Property, error) {
-	rows, err := d.db.Query(`
+func (d *Database) GetRecentSales(limit int, startDate, endDate string) ([]models.Property, error) {
+	query := `
         SELECT id, url, street, neighborhood, property_type, city, postal_code,
                price, year_built, living_area, num_rooms, status, 
                listing_date, selling_date, scraped_at, created_at
         FROM properties
         WHERE status = 'sold'
-        ORDER BY selling_date DESC
-        LIMIT ?
-    `, limit)
+    `
+	var args []interface{}
+
+	if startDate != "" {
+		query += " AND selling_date >= ?"
+		args = append(args, startDate)
+	}
+	if endDate != "" {
+		query += " AND selling_date <= ?"
+		args = append(args, endDate)
+	}
+
+	query += " ORDER BY selling_date DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -320,8 +372,10 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 	var processed, failed int
 	offset := 0
 	batchSize := 10
+	consecutiveEmptyBatches := 0
+	maxEmptyBatches := 3 // Safety limit to prevent infinite loops
 
-	for offset < totalCount {
+	for processed+failed < totalCount {
 		// Start a new transaction for each batch
 		tx, err := d.db.Begin()
 		if err != nil {
@@ -367,7 +421,9 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 		}
 
 		var batchProcessed int
+		hasRows := false
 		for rows.Next() {
+			hasRows = true
 			var id int64
 			var street, postalCode, city string
 			if err := rows.Scan(&id, &street, &postalCode, &city); err != nil {
@@ -421,8 +477,26 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 			return fmt.Errorf("failed to commit transaction: %v", err)
 		}
 
-		// Move to next batch
-		offset += batchProcessed
+		// Check if we got any rows in this batch
+		if !hasRows {
+			consecutiveEmptyBatches++
+			if consecutiveEmptyBatches >= maxEmptyBatches {
+				// If we've hit too many empty batches, something might be wrong
+				return fmt.Errorf("stopped after %d consecutive empty batches, processed %d/%d properties",
+					maxEmptyBatches, processed+failed, totalCount)
+			}
+		} else {
+			consecutiveEmptyBatches = 0
+		}
+
+		// Move to next batch, but only if we processed some items
+		if batchProcessed > 0 {
+			offset += batchProcessed
+		} else {
+			// If we didn't process any items but the query returned rows,
+			// increment by batch size to avoid getting stuck
+			offset += batchSize
+		}
 	}
 
 	// Log final stats

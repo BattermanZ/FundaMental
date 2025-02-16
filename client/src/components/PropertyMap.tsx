@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import 'leaflet.heat';
-import { Property } from '../types/property';
+import { Property, DateRange } from '../types/property';
 import { api } from '../services/api';
 import { Icon, LatLngTuple } from 'leaflet';
 import { CircularProgress, Typography, Box, Button, FormControl, InputLabel, Select, MenuItem, Slider, Grid } from '@mui/material';
@@ -27,7 +27,11 @@ interface FilterOptions {
     status: string;
 }
 
-const PropertyMap: React.FC = () => {
+interface PropertyMapProps {
+    dateRange: DateRange;
+}
+
+const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange }) => {
     const [properties, setProperties] = useState<Property[]>([]);
     const [filteredProperties, setFilteredProperties] = useState<Property[]>([]);
     const [loading, setLoading] = useState(true);
@@ -43,7 +47,8 @@ const PropertyMap: React.FC = () => {
 
     const fetchProperties = useCallback(async () => {
         try {
-            const data = await api.getAllProperties();
+            setLoading(true);
+            const data = await api.getAllProperties(dateRange);
             const validProperties = data.filter(
                 (property) => property.latitude != null && 
                             property.longitude != null
@@ -58,7 +63,7 @@ const PropertyMap: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [filters]);
+    }, [filters, dateRange]);
 
     useEffect(() => {
         fetchProperties();

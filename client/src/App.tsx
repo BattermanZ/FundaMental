@@ -1,7 +1,11 @@
-import React from 'react';
-import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab } from '@mui/material';
+import React, { useState } from 'react';
+import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab, Paper, Stack } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import dayjs, { Dayjs } from 'dayjs';
 import PropertyMap from './components/PropertyMap';
 import PropertyStats from './components/PropertyStats';
 import PropertyCharts from './components/PropertyCharts';
@@ -15,23 +19,61 @@ const StyledSection = styled(Box)(({ theme }) => ({
 }));
 
 // Create separate page components
-const DashboardPage = () => (
-    <>
-        <StyledSection>
-            <Typography variant="h4" gutterBottom>
-                Property Statistics
-            </Typography>
-            <PropertyStats />
-        </StyledSection>
+const DashboardPage = () => {
+    const [startDate, setStartDate] = useState<Dayjs | null>(dayjs().subtract(1, 'year'));
+    const [endDate, setEndDate] = useState<Dayjs | null>(dayjs());
 
-        <StyledSection>
-            <Typography variant="h4" gutterBottom>
-                Property Map
-            </Typography>
-            <PropertyMap />
-        </StyledSection>
-    </>
-);
+    const dateRange = {
+        startDate: startDate?.format('YYYY-MM-DD'),
+        endDate: endDate?.format('YYYY-MM-DD')
+    };
+
+    return (
+        <>
+            <StyledSection>
+                <Paper sx={{ p: 2, mb: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                        Date Range Filter
+                    </Typography>
+                    <Stack direction="row" spacing={2}>
+                        <DatePicker
+                            label="Start Date"
+                            value={startDate}
+                            onChange={(newValue) => setStartDate(newValue)}
+                            maxDate={endDate || undefined}
+                            slotProps={{
+                                textField: { fullWidth: true }
+                            }}
+                        />
+                        <DatePicker
+                            label="End Date"
+                            value={endDate}
+                            onChange={(newValue) => setEndDate(newValue)}
+                            minDate={startDate || undefined}
+                            slotProps={{
+                                textField: { fullWidth: true }
+                            }}
+                        />
+                    </Stack>
+                </Paper>
+            </StyledSection>
+
+            <StyledSection>
+                <Typography variant="h4" gutterBottom>
+                    Property Statistics
+                </Typography>
+                <PropertyStats dateRange={dateRange} />
+            </StyledSection>
+
+            <StyledSection>
+                <Typography variant="h4" gutterBottom>
+                    Property Map
+                </Typography>
+                <PropertyMap dateRange={dateRange} />
+            </StyledSection>
+        </>
+    );
+};
 
 const AnalyticsPage = () => (
     <StyledSection>
@@ -66,24 +108,26 @@ const Navigation = () => {
 function App() {
     return (
         <Router>
-            <Box sx={{ flexGrow: 1 }}>
-                <AppBar position="static">
-                    <Toolbar>
-                        <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                            FundaMental - Amsterdam Property Analysis
-                        </Typography>
-                    </Toolbar>
-                </AppBar>
-                
-                <Navigation />
+            <LocalizationProvider dateAdapter={AdapterDayjs}>
+                <Box sx={{ flexGrow: 1 }}>
+                    <AppBar position="static">
+                        <Toolbar>
+                            <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                                FundaMental - Amsterdam Property Analysis
+                            </Typography>
+                        </Toolbar>
+                    </AppBar>
+                    
+                    <Navigation />
 
-                <StyledContainer>
-                    <Routes>
-                        <Route path="/" element={<DashboardPage />} />
-                        <Route path="/analytics" element={<AnalyticsPage />} />
-                    </Routes>
-                </StyledContainer>
-            </Box>
+                    <StyledContainer>
+                        <Routes>
+                            <Route path="/" element={<DashboardPage />} />
+                            <Route path="/analytics" element={<AnalyticsPage />} />
+                        </Routes>
+                    </StyledContainer>
+                </Box>
+            </LocalizationProvider>
         </Router>
     );
 }

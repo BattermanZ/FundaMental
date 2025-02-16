@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { PropertyStats as Stats } from '../types/property';
+import { PropertyStats as Stats, DateRange } from '../types/property';
 import { api } from '../services/api';
 import { Card, CardContent, Typography, Grid } from '@mui/material';
 import { styled } from '@mui/material/styles';
@@ -19,14 +19,19 @@ const ValueTypography = styled(Typography)(() => ({
     fontSize: 24,
 }));
 
-const PropertyStats: React.FC = () => {
+interface PropertyStatsProps {
+    dateRange: DateRange;
+}
+
+const PropertyStats: React.FC<PropertyStatsProps> = ({ dateRange }) => {
     const [stats, setStats] = useState<Stats | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchStats = async () => {
             try {
-                const data = await api.getPropertyStats();
+                setLoading(true);
+                const data = await api.getPropertyStats(dateRange);
                 setStats(data);
             } catch (error) {
                 console.error('Failed to fetch stats:', error);
@@ -36,7 +41,7 @@ const PropertyStats: React.FC = () => {
         };
 
         fetchStats();
-    }, []);
+    }, [dateRange]);
 
     if (loading) {
         return <div>Loading statistics...</div>;

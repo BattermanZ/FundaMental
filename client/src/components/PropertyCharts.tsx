@@ -18,7 +18,12 @@ const PropertyCharts: React.FC = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const data = await api.getAllProperties();
+                setLoading(true);
+                const defaultDateRange = {
+                    startDate: undefined,
+                    endDate: undefined
+                };
+                const data = await api.getAllProperties(defaultDateRange);
                 setProperties(data);
                 setError(null);
             } catch (error) {

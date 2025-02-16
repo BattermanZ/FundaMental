@@ -34,4 +34,9 @@ export interface AreaStats {
     average_price: number;
     median_price: number;
     avg_price_per_sqm: number;
+}
+
+export interface DateRange {
+    startDate: string | undefined;
+    endDate: string | undefined;
 } 
