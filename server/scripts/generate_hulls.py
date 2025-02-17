@@ -1,29 +1,30 @@
 import json
 from pathlib import Path
 import logging
+import sys
 from geometry.hull_generator import generate_district_hull
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def process_districts():
+def process_districts(input_data):
     """
     Process the point data for each postal district and generate hull polygons.
-    Reads from amsterdam_postal_districts.geojson and creates amsterdam_district_hulls.geojson.
+    
+    Args:
+        input_data: Dictionary containing district points data from Go app
     """
-    logger.info("Reading postal district point data...")
+    logger.info("Processing district point data from Go app...")
     
-    input_path = Path('client/public/amsterdam_postal_districts.geojson')
-    output_path = Path('client/public/amsterdam_district_hulls.geojson')
-    
-    # Read the input GeoJSON
-    with open(input_path, 'r') as f:
-        point_data = json.load(f)
+    # Get the project root directory (three levels up from this script)
+    project_root = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    output_path = project_root / 'client' / 'public' / 'district_hulls.geojson'
     
     # Process each district
     hull_features = []
-    for feature in point_data['features']:
+    for feature in input_data['features']:
         district = feature['properties']['district']
         points = feature['geometry']['coordinates']
         
@@ -53,7 +54,7 @@ def process_districts():
         'type': 'FeatureCollection',
         'features': hull_features,
         'metadata': {
-            **point_data['metadata'],  # Copy existing metadata
+            **input_data.get('metadata', {}),  # Copy existing metadata
             'processing': {
                 'method': 'buffered_convex_hull',
                 'buffer_distance': 0.001,
@@ -67,6 +68,11 @@ def process_districts():
         json.dump(hull_geojson, f, indent=2)
     
     logger.info(f"Saved {len(hull_features)} district hulls to {output_path}")
+    
+    # Return success status to Go app
+    print(json.dumps({"status": "success", "hull_count": len(hull_features)}))
 
 if __name__ == '__main__':
-    process_districts() 
+    # Read input data from stdin (sent by Go app)
+    input_data = json.load(sys.stdin)
+    process_districts(input_data) 

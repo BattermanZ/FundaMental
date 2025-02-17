@@ -23,7 +23,7 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric }) => {
 
     useEffect(() => {
         // Load GeoJSON data for Amsterdam district hulls
-        fetch('/amsterdam_district_hulls.geojson')
+        fetch('/district_hulls.geojson')
             .then(response => response.json())
             .then(data => setGeoJsonData(data))
             .catch(error => console.error('Error loading district hulls:', error));

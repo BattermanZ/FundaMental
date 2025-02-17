@@ -3,6 +3,7 @@ package api
 import (
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
+	"fundamental/server/internal/geometry"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,9 +14,10 @@ import (
 )
 
 type Handler struct {
-	db       *database.Database
-	logger   *logrus.Logger
-	geocoder *geocoding.Geocoder
+	db              *database.Database
+	logger          *logrus.Logger
+	geocoder        *geocoding.Geocoder
+	districtManager *geometry.DistrictManager
 }
 
 type DateRange struct {
@@ -31,10 +33,15 @@ func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 	}
 
 	cacheDir := filepath.Join(os.TempDir(), "fundamental", "geocode_cache")
+
+	// Initialize the district manager
+	districtManager := geometry.NewDistrictManager(db.GetDB(), logger)
+
 	return &Handler{
-		db:       db,
-		logger:   logger,
-		geocoder: geocoding.NewGeocoder(logger, cacheDir),
+		db:              db,
+		logger:          logger,
+		geocoder:        geocoding.NewGeocoder(logger, cacheDir),
+		districtManager: districtManager,
 	}
 }
 
@@ -119,5 +126,18 @@ func (h *Handler) UpdateCoordinates(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": "Coordinates update process started",
+	})
+}
+
+func (h *Handler) UpdateDistrictHulls(c *gin.Context) {
+	err := h.districtManager.UpdateDistrictHulls()
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to update district hulls")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update district hulls"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "District hulls updated successfully",
 	})
 }

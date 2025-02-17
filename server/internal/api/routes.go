@@ -2,6 +2,7 @@ package api
 
 import (
 	"fundamental/server/internal/database"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,5 +16,6 @@ func SetupRoutes(router *gin.Engine, db *database.Database) {
 		api.GET("/areas/:postal_prefix", handler.GetAreaStats)
 		api.GET("/recent-sales", handler.GetRecentSales)
 		api.POST("/update-coordinates", handler.UpdateCoordinates)
+		api.POST("/update-district-hulls", handler.UpdateDistrictHulls)
 	}
-} 
+}

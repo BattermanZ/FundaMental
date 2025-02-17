@@ -486,3 +486,7 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 
 	return nil
 }
+
+func (d *Database) GetDB() *sql.DB {
+	return d.db
+}
