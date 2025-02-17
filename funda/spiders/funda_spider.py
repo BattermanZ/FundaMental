@@ -11,7 +11,7 @@ from datetime import datetime
 class FundaSpider(CrawlSpider):
     name = "funda_spider"
     allowed_domains = ["funda.nl"]
-    
+
     # List of user agents to rotate
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -155,7 +155,7 @@ class FundaSpider(CrawlSpider):
         if self.check_if_blocked(response):
             return
 
-        item = FundaItem()
+                item = FundaItem()
         item['url'] = response.url
         item['status'] = 'active'
         item['scraped_at'] = datetime.now().isoformat()
