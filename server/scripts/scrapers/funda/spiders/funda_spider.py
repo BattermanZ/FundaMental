@@ -2,6 +2,7 @@ import re
 import scrapy
 from scrapy.http import Request
 from scrapers.funda.items import FundaItem
+from scrapers.funda.database import FundaDB  # Import the database module
 import json
 from datetime import datetime
 import urllib.parse
@@ -20,7 +21,11 @@ class FundaSpider(scrapy.Spider):
         'AUTOTHROTTLE_START_DELAY': 2,
         'AUTOTHROTTLE_MAX_DELAY': 30,
         'AUTOTHROTTLE_TARGET_CONCURRENCY': 2.0,
-        'DOWNLOAD_TIMEOUT': 30
+        'DOWNLOAD_TIMEOUT': 30,
+        'ITEM_PIPELINES': {
+            'scrapers.funda.pipelines.FundaPipeline': 300,
+            'scrapers.funda.pipelines.JsonMessagePipeline': 900,
+        }
     }
 
     def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
@@ -31,6 +36,11 @@ class FundaSpider(scrapy.Spider):
         self.processed_urls = set()  # Track processed URLs in current run
         self.total_items_scraped = 0
         self.new_items_found = 0  # Track new items found
+        
+        # Initialize database connection for URL checking
+        self.db = FundaDB()
+        self.existing_urls = self.db.get_existing_urls()  # Get existing URLs from DB
+        self.logger.info(f"Found {len(self.existing_urls)} existing URLs in database")
         
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
@@ -92,8 +102,8 @@ class FundaSpider(scrapy.Spider):
             self.logger.error(f"Received status {response.status} for URL: {response.url}")
             return
         
-        # Extract listings from both JSON-LD and HTML
-        listing_urls = set()
+        # Extract all listing URLs from the page first
+        all_listing_urls = set()
         
         # 1. Try JSON-LD first
         json_ld_scripts = response.xpath('//script[@type="application/ld+json"]/text()').getall()
@@ -104,8 +114,8 @@ class FundaSpider(scrapy.Spider):
                     items = data['itemListElement']
                     for item in items:
                         url = item.get('url')
-                        if url and '/detail/koop/' in url and url not in self.processed_urls:
-                            listing_urls.add(url)
+                        if url and '/detail/koop/' in url:
+                            all_listing_urls.add(url)
             except json.JSONDecodeError:
                 continue
         
@@ -114,16 +124,26 @@ class FundaSpider(scrapy.Spider):
         html_listings.extend(response.css('div.search-result__header-title-col a::attr(href)').getall())
         
         for url in html_listings:
-            if '/detail/koop/' in url and url not in self.processed_urls:
+            if '/detail/koop/' in url:
                 full_url = response.urljoin(url)
-                listing_urls.add(full_url)
+                all_listing_urls.add(full_url)
+
+        # Now filter out existing URLs
+        new_listing_urls = {url for url in all_listing_urls 
+                          if url not in self.processed_urls and url not in self.existing_urls}
         
-        new_listings = len(listing_urls)
-        self.new_items_found += new_listings
-        self.logger.info(f"Found {new_listings} new listings on page {self.page_count}")
+        # If we found no new listings on this page, stop crawling
+        if not new_listing_urls:
+            self.logger.info(f"No new listings found on page {self.page_count}, all URLs already exist in database. Stopping crawl.")
+            return
+
+        # Log stats about new vs existing URLs
+        self.logger.info(f"Found {len(all_listing_urls)} total listings on page {self.page_count}")
+        self.logger.info(f"Found {len(new_listing_urls)} new listings to process")
+        self.new_items_found += len(new_listing_urls)
         
-        # Process found listings
-        for url in listing_urls:
+        # Process only new listings
+        for url in new_listing_urls:
             self.processed_urls.add(url)
             yield scrapy.Request(
                 url,
@@ -134,11 +154,6 @@ class FundaSpider(scrapy.Spider):
         
         # Save state after processing each page
         self.save_state()
-        
-        # If we found no new listings on this page, stop crawling
-        if not listing_urls:
-            self.logger.info(f"No new listings found on page {self.page_count}. Stopping crawl.")
-            return
         
         # Handle pagination if we haven't reached max_pages
         if not self.max_pages or self.page_count < self.max_pages:

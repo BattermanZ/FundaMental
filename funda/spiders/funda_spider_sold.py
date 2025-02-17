@@ -10,7 +10,6 @@ from datetime import datetime
 import urllib.parse
 import os
 import pickle
-from funda.data.database import FundaDB
 
 class FundaSpiderSold(scrapy.Spider):
     name = "funda_spider_sold"
@@ -27,15 +26,13 @@ class FundaSpiderSold(scrapy.Spider):
         'DOWNLOAD_TIMEOUT': 30
     }
 
-    def __init__(self, place='amsterdam', max_pages=None, resume=False, *args, **kwargs):
+    def __init__(self, place='amsterdam', max_pages=None, resume=False, existing_urls=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.place = place
-        # Set default max_pages to 200 if not specified
-        self.max_pages = int(max_pages) if max_pages else 200
+        self.max_pages = int(max_pages) if max_pages else None  # Remove default of 200 pages
         self.page_count = 1
         self.processed_urls = set()  # Track processed URLs in current run
-        self.db = FundaDB()  # Initialize database connection
-        self.existing_urls = self.db.get_existing_urls()  # Get existing URLs from database
+        self.existing_urls = set(existing_urls or [])  # Use provided URLs instead of database
         self.total_items_scraped = 0
         self.new_items_found = 0  # Track new items found
         self.resume = resume
@@ -54,7 +51,7 @@ class FundaSpiderSold(scrapy.Spider):
             'selected_area': json.dumps([place]),
             'availability': json.dumps(['unavailable']),
             'object_type': json.dumps(['house', 'apartment']),
-            'sort': 'date_down'
+            'sort': 'date_down'  # Most recent first
         }
         
         # If resuming and we have a page count, start from there
@@ -66,7 +63,7 @@ class FundaSpiderSold(scrapy.Spider):
         self.start_urls = [base_url]
         self.logger.info(f"Initial URL: {base_url}")
         self.logger.info(f"Maximum pages to scrape: {self.max_pages}")
-        self.logger.info(f"Found {len(self.existing_urls)} existing URLs in database")
+        self.logger.info(f"Found {len(self.existing_urls)} existing URLs")
 
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

@@ -2,8 +2,8 @@
 
 BOT_NAME = "funda"
 
-SPIDER_MODULES = ["funda.spiders"]
-NEWSPIDER_MODULE = "funda.spiders"
+SPIDER_MODULES = ["scrapers.funda.spiders"]
+NEWSPIDER_MODULE = "scrapers.funda.spiders"
 
 # Crawl responsibly by identifying yourself (and your website) in the user-agent
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -53,7 +53,8 @@ DEPTH_PRIORITY = 1
 
 # Configure item pipelines
 ITEM_PIPELINES = {
-    "funda.pipelines.FundaPipeline": 300,
+    "scrapers.funda.pipelines.FundaPipeline": 300,
+    "scrapers.funda.pipelines.JsonMessagePipeline": 900,
 }
 
 # Default Request Headers

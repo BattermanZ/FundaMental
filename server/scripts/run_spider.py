@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 import sys
+import os
 import json
 import logging
+
+# Add the server directory to the Python path
+server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, server_dir)
+
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 from scrapers.funda.spiders.funda_spider import FundaSpider
@@ -11,8 +17,35 @@ from scrapy.signalmanager import dispatcher
 from typing import List, Dict, Any
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"level":"%(levelname)s","msg":"%(message)s","time":"%(asctime)s"}',
+    datefmt='%Y-%m-%dT%H:%M:%S%z'
+)
+
+# Configure Scrapy logging to use our format
+from scrapy.utils.log import configure_logging
+configure_logging(install_root_handler=False)
+
+# Create our custom handler
+formatter = logging.Formatter(
+    '{"level":"%(levelname)s","msg":"%(message)s","time":"%(asctime)s"}',
+    datefmt='%Y-%m-%dT%H:%M:%S%z'
+)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(formatter)
+
+# Add handler to both our logger and Scrapy's logger
 logger = logging.getLogger(__name__)
+logger.addHandler(handler)
+scrapy_logger = logging.getLogger('scrapy')
+scrapy_logger.addHandler(handler)
+scrapy_logger.setLevel(logging.INFO)
+
+# Also capture twisted logs
+twisted_logger = logging.getLogger('twisted')
+twisted_logger.addHandler(handler)
+twisted_logger.setLevel(logging.INFO)
 
 class ItemCollector:
     """Collects items and sends them in batches to Go."""
@@ -63,54 +96,36 @@ def run_spider(spider_type, place='amsterdam', max_pages=None, resume=False):
             collector.process_item(item)
             return item
         
-        def handle_spider_closed(spider, reason):
-            # Flush any remaining items
-            collector.flush_items()
-            # Send final statistics
-            print(json.dumps({
-                "type": "complete",
-                "data": {
-                    "status": "success",
-                    "total_items": collector.total_items,
-                    "message": f"Completed scraping {spider_type} listings for {place}"
-                }
-            }))
-            sys.stdout.flush()
-        
         # Create crawler process
         process = CrawlerProcess(settings)
         
-        # Connect signals
+        # Connect to item signals
         dispatcher.connect(handle_item, signal=signals.item_scraped)
-        dispatcher.connect(handle_spider_closed, signal=signals.spider_closed)
         
-        # Choose spider based on type
+        # Run appropriate spider
         if spider_type == 'active':
-            spider_class = FundaSpider
-            spider_kwargs = {'place': place, 'max_pages': max_pages}
+            process.crawl(FundaSpider, 
+                        place=place,
+                        max_pages=max_pages)
         elif spider_type == 'sold':
-            spider_class = FundaSpiderSold
-            spider_kwargs = {'place': place, 'max_pages': max_pages, 'resume': resume}
+            process.crawl(FundaSpiderSold, 
+                        place=place,
+                        max_pages=max_pages,
+                        resume=resume)
         else:
             raise ValueError(f"Invalid spider type: {spider_type}")
         
-        # Configure spider
-        process.crawl(spider_class, **spider_kwargs)
-        
-        # Start crawling
+        # Start the crawling process
         process.start()
+        
+        # Flush any remaining items
+        collector.flush_items()
+        
+        return True
         
     except Exception as e:
         logger.error(f"Error running spider: {e}")
-        print(json.dumps({
-            "type": "error",
-            "data": {
-                "status": "error",
-                "message": str(e)
-            }
-        }))
-        sys.stdout.flush()
-        sys.exit(1)
+        return False
 
 if __name__ == '__main__':
     # Parse command line arguments from Go

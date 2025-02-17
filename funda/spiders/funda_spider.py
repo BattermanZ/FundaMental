@@ -7,6 +7,7 @@ import json
 import random
 from datetime import datetime
 import urllib.parse
+import os
 
 class FundaSpider(scrapy.Spider):
     name = "funda_spider"
@@ -23,16 +24,20 @@ class FundaSpider(scrapy.Spider):
         'DOWNLOAD_TIMEOUT': 30
     }
 
-    def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
+    def __init__(self, place='amsterdam', max_pages=None, existing_urls=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.place = place
         self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
         self.processed_urls = set()  # Track processed URLs in current run
-        self.db = FundaDB()  # Initialize database connection
-        self.existing_urls = self.db.get_existing_urls()  # Get existing URLs from database
+        self.existing_urls = set(existing_urls or [])  # Use provided URLs instead of database
         self.total_items_scraped = 0
         self.new_items_found = 0  # Track new items found
+        
+        # Create state directory if it doesn't exist
+        self.state_dir = os.path.join(os.getcwd(), '.spider_state')
+        os.makedirs(self.state_dir, exist_ok=True)
+        self.state_file = os.path.join(self.state_dir, f'funda_active_{place}_state.pkl')
         
         # Base parameters for the search
         self.base_params = {
@@ -46,7 +51,7 @@ class FundaSpider(scrapy.Spider):
         self.start_urls = [base_url]
         self.logger.info(f"Initial URL: {base_url}")
         self.logger.info(f"Maximum pages to scrape: {self.max_pages}")
-        self.logger.info(f"Found {len(self.existing_urls)} existing URLs in database")
+        self.logger.info(f"Found {len(self.existing_urls)} existing URLs")
 
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

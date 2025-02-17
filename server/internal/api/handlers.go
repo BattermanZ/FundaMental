@@ -46,7 +46,7 @@ func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 	districtManager := geometry.NewDistrictManager(db.GetDB(), logger)
 
 	// Initialize the spider manager
-	spiderManager := scraping.NewSpiderManager(logger)
+	spiderManager := scraping.NewSpiderManager(db, logger)
 
 	return &Handler{
 		db:              db,

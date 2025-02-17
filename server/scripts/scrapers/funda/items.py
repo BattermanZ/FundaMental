@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional
 from datetime import datetime
 
@@ -24,4 +24,12 @@ class FundaItem:
 
     def to_dict(self) -> dict:
         """Convert item to dictionary for JSON serialization."""
-        return {k: v for k, v in self.__dict__.items() if v is not None} 
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+    def __getitem__(self, key):
+        """Support dictionary-style access for compatibility."""
+        return getattr(self, key)
+
+    def __contains__(self, key):
+        """Support 'in' operator for checking if field exists and has value."""
+        return hasattr(self, key) and getattr(self, key) is not None 

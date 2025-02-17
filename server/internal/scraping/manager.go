@@ -2,7 +2,6 @@ package scraping
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"fundamental/server/internal/database"
@@ -65,108 +64,114 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 		"resume":      params.Resume,
 	}).Info("Starting spider")
 
-	// Convert parameters to JSON
-	inputData, err := json.Marshal(params)
-	if err != nil {
-		return fmt.Errorf("failed to marshal spider parameters: %w", err)
-	}
-
-	// Create command to run the Python script
+	// Prepare the command
 	cmd := exec.Command("python3", m.scriptPath)
-	cmd.Stdin = bytes.NewBuffer(inputData)
 
-	// Create pipes for stdout and stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	// Prepare input data
+	input := map[string]interface{}{
+		"spider_type": params.SpiderType,
+		"place":       params.Place,
+		"max_pages":   params.MaxPages,
+		"resume":      params.Resume,
 	}
 
-	stderr, err := cmd.StderrPipe()
+	// Convert input to JSON
+	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
+		return fmt.Errorf("failed to marshal input data: %v", err)
 	}
+
+	// Create pipes for stdin and stdout
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdin pipe: %v", err)
+	}
+
+	// Combine stdout and stderr
+	combinedOutput, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+	cmd.Stderr = cmd.Stdout
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start spider: %w", err)
+		return fmt.Errorf("failed to start spider: %v", err)
 	}
 
-	// Create a channel to signal completion
-	done := make(chan error, 1)
+	// Write input data
+	if _, err := stdin.Write(inputJSON); err != nil {
+		return fmt.Errorf("failed to write input data: %v", err)
+	}
+	stdin.Close()
 
-	// Process stdout in a goroutine
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			var msg SpiderMessage
-			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-				m.logger.WithError(err).Error("Failed to parse spider message")
+	// Read output
+	scanner := bufio.NewScanner(combinedOutput)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024) // Increase buffer size to 1MB
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		// First try to parse as a log message
+		var logMessage struct {
+			Level string `json:"level"`
+			Msg   string `json:"msg"`
+			Time  string `json:"time"`
+		}
+		if err := json.Unmarshal(line, &logMessage); err == nil {
+			// Forward the log message using the appropriate log level
+			switch logMessage.Level {
+			case "ERROR":
+				m.logger.Error(logMessage.Msg)
+			case "WARNING":
+				m.logger.Warn(logMessage.Msg)
+			case "INFO":
+				m.logger.Info(logMessage.Msg)
+			case "DEBUG":
+				m.logger.Debug(logMessage.Msg)
+			}
+			continue
+		}
+
+		// If not a log message, try parsing as a spider message
+		var message SpiderMessage
+		if err := json.Unmarshal(line, &message); err != nil {
+			// If we can't parse it as JSON at all, just log it as debug
+			m.logger.Debug(string(line))
+			continue
+		}
+
+		switch message.Type {
+		case "items":
+			// Process scraped items
+			var items []map[string]interface{}
+			if err := json.Unmarshal(message.Data, &items); err != nil {
+				m.logger.WithError(err).Error("Failed to parse items data")
 				continue
 			}
-
-			switch msg.Type {
-			case "items":
-				// Parse and store items
-				var items []map[string]interface{}
-				if err := json.Unmarshal(msg.Data, &items); err != nil {
-					m.logger.WithError(err).Error("Failed to parse items")
-					continue
-				}
-				if err := m.db.InsertProperties(items); err != nil {
-					m.logger.WithError(err).Error("Failed to store items")
-				}
-
-			case "complete":
-				// Parse completion message
-				var complete struct {
-					Status     string `json:"status"`
-					Message    string `json:"message"`
-					TotalItems int    `json:"total_items"`
-				}
-				if err := json.Unmarshal(msg.Data, &complete); err != nil {
-					m.logger.WithError(err).Error("Failed to parse completion message")
-					continue
-				}
-				m.logger.WithFields(logrus.Fields{
-					"status":      complete.Status,
-					"message":     complete.Message,
-					"total_items": complete.TotalItems,
-				}).Info("Spider completed")
-
-			case "error":
-				// Parse error message
-				var errMsg struct {
-					Status  string `json:"status"`
-					Message string `json:"message"`
-				}
-				if err := json.Unmarshal(msg.Data, &errMsg); err != nil {
-					m.logger.WithError(err).Error("Failed to parse error message")
-					continue
-				}
-				m.logger.WithField("message", errMsg.Message).Error("Spider error")
+			m.logger.WithField("items", items).Info("Received items from spider")
+			// Process items using InsertProperties
+			if err := m.db.InsertProperties(items); err != nil {
+				m.logger.WithError(err).Error("Failed to store properties")
 			}
+		case "error":
+			var errorData map[string]interface{}
+			if err := json.Unmarshal(message.Data, &errorData); err != nil {
+				m.logger.WithError(err).Error("Failed to parse error data")
+				continue
+			}
+			m.logger.WithField("error", errorData).Error("Spider error")
 		}
-		if err := scanner.Err(); err != nil {
-			m.logger.WithError(err).Error("Scanner error")
-		}
-	}()
+	}
 
-	// Process stderr in a goroutine
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			m.logger.Error(scanner.Text())
-		}
-	}()
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading spider output: %v", err)
+	}
 
-	// Wait for command completion in a goroutine
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	// Wait for completion or timeout
-	if err := <-done; err != nil {
-		return fmt.Errorf("spider execution failed: %w", err)
+	// Wait for the command to complete
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("spider failed: %v", err)
 	}
 
 	return nil
