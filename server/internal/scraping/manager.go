@@ -39,6 +39,7 @@ func NewSpiderManager(db *database.Database, logger *logrus.Logger) *SpiderManag
 		logger = logrus.New()
 		logger.SetFormatter(&logrus.JSONFormatter{})
 		logger.SetOutput(os.Stdout)
+		logger.SetLevel(logrus.DebugLevel)
 	}
 
 	// Get the absolute path to the script
@@ -113,13 +114,43 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 
-		// First try to parse as a log message
+		// Log raw output for debugging
+		m.logger.WithField("raw_output", string(line)).Debug("Raw spider output")
+
+		// First try parsing as a spider message
+		var message SpiderMessage
+		if err := json.Unmarshal(line, &message); err == nil && message.Type != "" {
+			switch message.Type {
+			case "items":
+				// Process scraped items
+				var items []map[string]interface{}
+				if err := json.Unmarshal(message.Data, &items); err != nil {
+					m.logger.WithError(err).Error("Failed to parse items data")
+					continue
+				}
+				m.logger.WithField("items", items).Info("Received items from spider")
+				// Process items using InsertProperties
+				if err := m.db.InsertProperties(items); err != nil {
+					m.logger.WithError(err).Error("Failed to store properties")
+				}
+			case "error":
+				var errorData map[string]interface{}
+				if err := json.Unmarshal(message.Data, &errorData); err != nil {
+					m.logger.WithError(err).Error("Failed to parse error data")
+					continue
+				}
+				m.logger.WithField("error", errorData).Error("Spider error")
+			}
+			continue
+		}
+
+		// If not a spider message, try parsing as a log message
 		var logMessage struct {
 			Level string `json:"level"`
 			Msg   string `json:"msg"`
 			Time  string `json:"time"`
 		}
-		if err := json.Unmarshal(line, &logMessage); err == nil {
+		if err := json.Unmarshal(line, &logMessage); err == nil && logMessage.Level != "" {
 			// Forward the log message using the appropriate log level
 			switch logMessage.Level {
 			case "ERROR":
@@ -134,35 +165,8 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 			continue
 		}
 
-		// If not a log message, try parsing as a spider message
-		var message SpiderMessage
-		if err := json.Unmarshal(line, &message); err != nil {
-			// If we can't parse it as JSON at all, just log it as debug
-			m.logger.Debug(string(line))
-			continue
-		}
-
-		switch message.Type {
-		case "items":
-			// Process scraped items
-			var items []map[string]interface{}
-			if err := json.Unmarshal(message.Data, &items); err != nil {
-				m.logger.WithError(err).Error("Failed to parse items data")
-				continue
-			}
-			m.logger.WithField("items", items).Info("Received items from spider")
-			// Process items using InsertProperties
-			if err := m.db.InsertProperties(items); err != nil {
-				m.logger.WithError(err).Error("Failed to store properties")
-			}
-		case "error":
-			var errorData map[string]interface{}
-			if err := json.Unmarshal(message.Data, &errorData); err != nil {
-				m.logger.WithError(err).Error("Failed to parse error data")
-				continue
-			}
-			m.logger.WithField("error", errorData).Error("Spider error")
-		}
+		// If we can't parse it as either message type, just log it as debug
+		m.logger.Debug(string(line))
 	}
 
 	if err := scanner.Err(); err != nil {
