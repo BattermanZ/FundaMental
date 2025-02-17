@@ -213,12 +213,9 @@ const PropertyCharts: React.FC = () => {
                     </Paper>
                 </Grid>
 
-                {/* Price Heatmaps */}
+                {/* Price Heatmap */}
                 <Grid item xs={12}>
-                    <PriceHeatmap properties={properties} metric="price" />
-                </Grid>
-                <Grid item xs={12}>
-                    <PriceHeatmap properties={properties} metric="price_per_sqm" />
+                    <PriceHeatmap properties={properties} />
                 </Grid>
 
                 {/* Price by Postal Code */}
