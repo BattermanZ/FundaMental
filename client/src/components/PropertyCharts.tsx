@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Property } from '../types/property';
 import { api } from '../services/api';
 import {
@@ -40,7 +40,6 @@ interface FilterOptions {
 
 const PropertyCharts: React.FC = () => {
     const [properties, setProperties] = useState<Property[]>([]);
-    const [filteredProperties, setFilteredProperties] = useState<Property[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     
@@ -127,78 +126,54 @@ const PropertyCharts: React.FC = () => {
         fetchData();
     }, []);
 
-    // Apply filters
-    const applyFilters = () => {
-        setFilters(pendingFilters);
-        const filtered = properties.filter(property => {
+    // Memoize filtered properties
+    const filteredPropertiesMemo = useMemo(() => {
+        return properties.filter(property => {
             // Date filter - check both listing_date and selling_date
-            if (pendingFilters.startDate) {
+            if (filters.startDate) {
                 const listingDate = dayjs(property.listing_date);
                 const sellingDate = property.selling_date ? dayjs(property.selling_date) : null;
                 
-                // For sold properties, check selling_date
                 if (property.status === 'sold' && sellingDate) {
-                    if (sellingDate.isBefore(pendingFilters.startDate)) return false;
+                    if (sellingDate.isBefore(filters.startDate)) return false;
                 } else {
-                    // For active properties, check listing_date
-                    if (listingDate.isBefore(pendingFilters.startDate)) return false;
+                    if (listingDate.isBefore(filters.startDate)) return false;
                 }
             }
             
-            if (pendingFilters.endDate) {
+            if (filters.endDate) {
                 const listingDate = dayjs(property.listing_date);
                 const sellingDate = property.selling_date ? dayjs(property.selling_date) : null;
                 
-                // For sold properties, check selling_date
                 if (property.status === 'sold' && sellingDate) {
-                    if (sellingDate.isAfter(pendingFilters.endDate)) return false;
+                    if (sellingDate.isAfter(filters.endDate)) return false;
                 } else {
-                    // For active properties, check listing_date
-                    if (listingDate.isAfter(pendingFilters.endDate)) return false;
+                    if (listingDate.isAfter(filters.endDate)) return false;
                 }
             }
             
-            // Rest of the filter conditions remain the same
-            if (pendingFilters.propertyType !== 'all' && property.property_type !== pendingFilters.propertyType) return false;
-            if (pendingFilters.status !== 'all' && property.status !== pendingFilters.status) return false;
+            if (filters.propertyType !== 'all' && property.property_type !== filters.propertyType) return false;
+            if (filters.status !== 'all' && property.status !== filters.status) return false;
             if (property.num_rooms && (
-                property.num_rooms < pendingFilters.numRooms[0] ||
-                property.num_rooms > pendingFilters.numRooms[1]
+                property.num_rooms < filters.numRooms[0] ||
+                property.num_rooms > filters.numRooms[1]
             )) return false;
             if (property.price && (
-                property.price < pendingFilters.priceRange[0] ||
-                property.price > pendingFilters.priceRange[1]
+                property.price < filters.priceRange[0] ||
+                property.price > filters.priceRange[1]
             )) return false;
             if (property.living_area && (
-                property.living_area < pendingFilters.sizeRange[0] ||
-                property.living_area > pendingFilters.sizeRange[1]
+                property.living_area < filters.sizeRange[0] ||
+                property.living_area > filters.sizeRange[1]
             )) return false;
             
             return true;
         });
-        
-        setFilteredProperties(filtered);
-    };
+    }, [properties, filters]);
 
-    // Reset filters
-    const resetFilters = () => {
-        const resetValues: FilterOptions = {
-            startDate: null,
-            endDate: null,
-            propertyType: 'all',
-            status: 'all',
-            numRooms: [ranges.rooms.min, ranges.rooms.max] as [number, number],
-            priceRange: [ranges.price.min, ranges.price.max] as [number, number],
-            sizeRange: [ranges.size.min, ranges.size.max] as [number, number]
-        };
-        setPendingFilters(resetValues);
-        setFilters(resetValues);
-        setFilteredProperties(properties);
-    };
-
-    // Prepare data for Price vs Living Area Scatter Plot
-    const preparePriceVsAreaData = () => {
-        return filteredProperties
+    // Memoize chart data
+    const scatterData = useMemo(() => {
+        return filteredPropertiesMemo
             .filter(p => p.living_area && p.price)
             .map(p => ({
                 living_area: p.living_area,
@@ -207,12 +182,11 @@ const PropertyCharts: React.FC = () => {
                 num_rooms: p.num_rooms || 1,
                 price_per_sqm: p.price / p.living_area
             }));
-    };
+    }, [filteredPropertiesMemo]);
 
-    // Replace prepareBoxPlotData with new preparePriceByPostalCodeData
-    const preparePriceByPostalCodeData = () => {
+    const priceByPostalCodeData = useMemo(() => {
         const postalGroups = d3.group(
-            filteredProperties.filter(p => p.price),
+            filteredPropertiesMemo.filter(p => p.price),
             d => d.postal_code.substring(0, 4)
         );
 
@@ -222,22 +196,18 @@ const PropertyCharts: React.FC = () => {
             median_price: d3.median(group, d => d.price) || 0,
             count: group.length
         })).sort((a, b) => b.avg_price - a.avg_price);
-    };
+    }, [filteredPropertiesMemo]);
 
-    // Prepare Time Series Data
-    const prepareTimeSeriesData = () => {
-        const soldProperties = filteredProperties
+    const timeSeriesData = useMemo(() => {
+        const soldProperties = filteredPropertiesMemo
             .filter(p => p.status === 'sold' && p.selling_date)
             .sort((a, b) => new Date(a.selling_date).getTime() - new Date(b.selling_date).getTime());
 
-        // Group by month and ensure we have at least one property
         if (soldProperties.length === 0) return [];
 
-        // Get the date range
         const startDate = dayjs(soldProperties[0].selling_date).startOf('month');
         const endDate = dayjs(soldProperties[soldProperties.length - 1].selling_date).endOf('month');
         
-        // Create array of all months in range
         const months: string[] = [];
         let currentDate = startDate;
         while (currentDate.isBefore(endDate) || currentDate.isSame(endDate, 'month')) {
@@ -245,12 +215,10 @@ const PropertyCharts: React.FC = () => {
             currentDate = currentDate.add(1, 'month');
         }
 
-        // Group by month
         const monthlyGroups = d3.group(soldProperties, d => 
             dayjs(d.selling_date).format('YYYY-MM')
         );
 
-        // Create data for each month, including months with no sales
         return months.map(month => {
             const group = monthlyGroups.get(month) || [];
             return {
@@ -264,12 +232,11 @@ const PropertyCharts: React.FC = () => {
                 count: group.length
             };
         });
-    };
+    }, [filteredPropertiesMemo]);
 
-    // Prepare Price per Square Meter Analysis
-    const preparePricePerSqmData = () => {
+    const pricePerSqmData = useMemo(() => {
         const postalGroups = d3.group(
-            filteredProperties.filter(p => p.living_area && p.price),
+            filteredPropertiesMemo.filter(p => p.living_area && p.price),
             d => d.postal_code.substring(0, 4)
         );
 
@@ -279,10 +246,10 @@ const PropertyCharts: React.FC = () => {
             median_price_per_sqm: d3.median(group, d => d.price / d.living_area) || 0,
             count: group.length
         })).sort((a, b) => b.avg_price_per_sqm - a.avg_price_per_sqm);
-    };
+    }, [filteredPropertiesMemo]);
 
     // Calculate regression line for scatter plot
-    const calculateRegressionLine = (data: any[]) => {
+    const calculateRegressionLine = useCallback((data: any[]) => {
         const xValues = data.map(d => d.living_area);
         const yValues = data.map(d => d.price);
         
@@ -302,113 +269,139 @@ const PropertyCharts: React.FC = () => {
             { x: minX, y: slope * minX + intercept },
             { x: maxX, y: slope * maxX + intercept }
         ];
-    };
+    }, []);
 
-    const FilterPanel = () => (
-        <Paper sx={{ p: 3, mb: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                    Filters
-                </Typography>
-                <Box>
-                    <Button 
-                        variant="outlined" 
-                        onClick={resetFilters} 
-                        sx={{ mr: 1 }}
-                    >
-                        Reset
-                    </Button>
-                    <Button 
-                        variant="contained" 
-                        onClick={applyFilters}
-                    >
-                        Apply Filters
-                    </Button>
+    const regressionLine = useMemo(() => {
+        return calculateRegressionLine(scatterData);
+    }, [scatterData, calculateRegressionLine]);
+
+    // Memoize handlers
+    const applyFilters = useCallback(() => {
+        setFilters(pendingFilters);
+    }, [pendingFilters]);
+
+    const resetFilters = useCallback(() => {
+        const resetValues: FilterOptions = {
+            startDate: null,
+            endDate: null,
+            propertyType: 'all',
+            status: 'all',
+            numRooms: [ranges.rooms.min, ranges.rooms.max] as [number, number],
+            priceRange: [ranges.price.min, ranges.price.max] as [number, number],
+            sizeRange: [ranges.size.min, ranges.size.max] as [number, number]
+        };
+        setPendingFilters(resetValues);
+        setFilters(resetValues);
+    }, [ranges]);
+
+    // Memoize FilterPanel component
+    const FilterPanel = useMemo(() => {
+        return (
+            <Paper sx={{ p: 3, mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6">
+                        Filters
+                    </Typography>
+                    <Box>
+                        <Button 
+                            variant="outlined" 
+                            onClick={resetFilters} 
+                            sx={{ mr: 1 }}
+                        >
+                            Reset
+                        </Button>
+                        <Button 
+                            variant="contained" 
+                            onClick={applyFilters}
+                        >
+                            Apply Filters
+                        </Button>
+                    </Box>
                 </Box>
-            </Box>
-            <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
-                    <Stack spacing={2}>
-                        <DatePicker
-                            label="Start Date"
-                            value={pendingFilters.startDate}
-                            onChange={(newValue) => setPendingFilters(prev => ({ ...prev, startDate: newValue }))}
-                            slotProps={{ textField: { fullWidth: true } }}
+                <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                        <Stack spacing={2}>
+                            <DatePicker
+                                label="Start Date"
+                                value={pendingFilters.startDate}
+                                onChange={(newValue) => setPendingFilters(prev => ({ ...prev, startDate: newValue }))}
+                                slotProps={{ textField: { fullWidth: true } }}
+                            />
+                            <DatePicker
+                                label="End Date"
+                                value={pendingFilters.endDate}
+                                onChange={(newValue) => setPendingFilters(prev => ({ ...prev, endDate: newValue }))}
+                                slotProps={{ textField: { fullWidth: true } }}
+                            />
+                        </Stack>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                        <Stack spacing={2}>
+                            <FormControl fullWidth>
+                                <InputLabel>Property Type</InputLabel>
+                                <Select
+                                    value={pendingFilters.propertyType}
+                                    label="Property Type"
+                                    onChange={(e) => setPendingFilters(prev => ({ ...prev, propertyType: e.target.value }))}
+                                >
+                                    <MenuItem value="all">All</MenuItem>
+                                    <MenuItem value="appartement">Apartment</MenuItem>
+                                    <MenuItem value="huis">House</MenuItem>
+                                </Select>
+                            </FormControl>
+                            <FormControl fullWidth>
+                                <InputLabel>Status</InputLabel>
+                                <Select
+                                    value={pendingFilters.status}
+                                    label="Status"
+                                    onChange={(e) => setPendingFilters(prev => ({ ...prev, status: e.target.value }))}
+                                >
+                                    <MenuItem value="all">All</MenuItem>
+                                    <MenuItem value="active">Active</MenuItem>
+                                    <MenuItem value="sold">Sold</MenuItem>
+                                </Select>
+                            </FormControl>
+                        </Stack>
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                        <Typography gutterBottom>Number of Rooms</Typography>
+                        <Slider
+                            value={pendingFilters.numRooms}
+                            onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, numRooms: newValue as [number, number] }))}
+                            valueLabelDisplay="auto"
+                            min={ranges.rooms.min}
+                            max={ranges.rooms.max}
+                            marks
                         />
-                        <DatePicker
-                            label="End Date"
-                            value={pendingFilters.endDate}
-                            onChange={(newValue) => setPendingFilters(prev => ({ ...prev, endDate: newValue }))}
-                            slotProps={{ textField: { fullWidth: true } }}
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                        <Typography gutterBottom>Price Range (€)</Typography>
+                        <Slider
+                            value={pendingFilters.priceRange}
+                            onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, priceRange: newValue as [number, number] }))}
+                            valueLabelDisplay="auto"
+                            min={ranges.price.min}
+                            max={ranges.price.max}
+                            step={50000}
+                            valueLabelFormat={(value) => `€${(value/1000)}k`}
                         />
-                    </Stack>
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                        <Typography gutterBottom>Size Range (m²)</Typography>
+                        <Slider
+                            value={pendingFilters.sizeRange}
+                            onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, sizeRange: newValue as [number, number] }))}
+                            valueLabelDisplay="auto"
+                            min={ranges.size.min}
+                            max={ranges.size.max}
+                            step={5}
+                            valueLabelFormat={(value) => `${value}m²`}
+                        />
+                    </Grid>
                 </Grid>
-                <Grid item xs={12} md={6}>
-                    <Stack spacing={2}>
-                        <FormControl fullWidth>
-                            <InputLabel>Property Type</InputLabel>
-                            <Select
-                                value={pendingFilters.propertyType}
-                                label="Property Type"
-                                onChange={(e) => setPendingFilters(prev => ({ ...prev, propertyType: e.target.value }))}
-                            >
-                                <MenuItem value="all">All</MenuItem>
-                                <MenuItem value="appartement">Apartment</MenuItem>
-                                <MenuItem value="huis">House</MenuItem>
-                            </Select>
-                        </FormControl>
-                        <FormControl fullWidth>
-                            <InputLabel>Status</InputLabel>
-                            <Select
-                                value={pendingFilters.status}
-                                label="Status"
-                                onChange={(e) => setPendingFilters(prev => ({ ...prev, status: e.target.value }))}
-                            >
-                                <MenuItem value="all">All</MenuItem>
-                                <MenuItem value="active">Active</MenuItem>
-                                <MenuItem value="sold">Sold</MenuItem>
-                            </Select>
-                        </FormControl>
-                    </Stack>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                    <Typography gutterBottom>Number of Rooms</Typography>
-                    <Slider
-                        value={pendingFilters.numRooms}
-                        onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, numRooms: newValue as [number, number] }))}
-                        valueLabelDisplay="auto"
-                        min={ranges.rooms.min}
-                        max={ranges.rooms.max}
-                        marks
-                    />
-                </Grid>
-                <Grid item xs={12} md={4}>
-                    <Typography gutterBottom>Price Range (€)</Typography>
-                    <Slider
-                        value={pendingFilters.priceRange}
-                        onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, priceRange: newValue as [number, number] }))}
-                        valueLabelDisplay="auto"
-                        min={ranges.price.min}
-                        max={ranges.price.max}
-                        step={50000}
-                        valueLabelFormat={(value) => `€${(value/1000)}k`}
-                    />
-                </Grid>
-                <Grid item xs={12} md={4}>
-                    <Typography gutterBottom>Size Range (m²)</Typography>
-                    <Slider
-                        value={pendingFilters.sizeRange}
-                        onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, sizeRange: newValue as [number, number] }))}
-                        valueLabelDisplay="auto"
-                        min={ranges.size.min}
-                        max={ranges.size.max}
-                        step={5}
-                        valueLabelFormat={(value) => `${value}m²`}
-                    />
-                </Grid>
-            </Grid>
-        </Paper>
-    );
+            </Paper>
+        );
+    }, [pendingFilters, ranges, applyFilters, resetFilters]);
 
     if (loading) {
         return (
@@ -426,15 +419,9 @@ const PropertyCharts: React.FC = () => {
         );
     }
 
-    const scatterData = preparePriceVsAreaData();
-    const priceByPostalCodeData = preparePriceByPostalCodeData();
-    const timeSeriesData = prepareTimeSeriesData();
-    const pricePerSqmData = preparePricePerSqmData();
-    const regressionLine = calculateRegressionLine(scatterData);
-
     return (
         <Box mt={4}>
-            <FilterPanel />
+            {FilterPanel}
             <Grid container spacing={3}>
                 {/* Price vs Living Area Scatter Plot */}
                 <Grid item xs={12}>
@@ -488,7 +475,7 @@ const PropertyCharts: React.FC = () => {
 
                 {/* Price Heatmap */}
                 <Grid item xs={12}>
-                    <PriceHeatmap properties={filteredProperties} />
+                    <PriceHeatmap properties={filteredPropertiesMemo} />
                 </Grid>
 
                 {/* Price by Postal Code */}
@@ -620,4 +607,4 @@ const PropertyCharts: React.FC = () => {
     );
 };
 
-export default PropertyCharts; 
+export default React.memo(PropertyCharts); 
