@@ -1,161 +1,143 @@
 import re
 import scrapy
-from scrapy.spiders import CrawlSpider, Rule
-from scrapy.linkextractors import LinkExtractor
-from funda.core.items import FundaItem
 from scrapy.http import Request
+from funda.core.items import FundaItem
 import json
 import random
 from datetime import datetime
+import urllib.parse
 
-class FundaSpider(CrawlSpider):
+class FundaSpider(scrapy.Spider):
     name = "funda_spider"
     allowed_domains = ["funda.nl"]
 
-    # List of user agents to rotate
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
-    ]
-
     def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
-        self.place = place.lower()
+        super().__init__(*args, **kwargs)
+        self.place = place
+        # Set default max_pages to None if not specified
         self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
-        self.start_urls = [f"https://www.funda.nl/zoeken/koop/?selected_area=%5B%22{place}%22%5D&sort=date_down"]
+        self.processed_urls = set()  # Track processed URLs
+        self.total_items_scraped = 0
         
-        # Define rules for following links
-        self.rules = (
-            Rule(
-                LinkExtractor(
-                    allow=r'/koop/[^/]+/(?:huis|appartement)-[^/]+/\d+/',
-                    deny=(r'/en/', r'/verkocht/', r'/print/', r'/kenmerken/', r'/fotos/', r'/video/')
-                ),
-                callback='parse_house',
-                follow=True
-            ),
-            # Add pagination rule with process_links callback
-            Rule(
-                LinkExtractor(
-                    allow=r'/zoeken/koop/.*p\d+',
-                    deny=(r'/verkocht/', r'/print/', r'/kenmerken/', r'/fotos/', r'/video/')
-                ),
-                process_links='process_pagination_links',
-                follow=True
-            ),
-        )
+        # Base parameters for the search
+        self.base_params = {
+            'selected_area': json.dumps([place]),
+            'availability': json.dumps(['available']),
+            'object_type': json.dumps(['house', 'apartment']),
+            'sort': 'date_down'
+        }
         
-        # This is crucial for CrawlSpider
-        super(FundaSpider, self).__init__(*args, **kwargs)
+        base_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(self.base_params)}"
+        self.start_urls = [base_url]
+        self.logger.info(f"Initial URL: {base_url}")
+        self.logger.info(f"Maximum pages to scrape: {self.max_pages}")
 
-    def process_pagination_links(self, links):
-        """Process pagination links to respect max_pages setting."""
-        if self.max_pages is None:
-            return links
-            
-        filtered_links = []
-        for link in links:
-            # Extract page number from the URL
-            match = re.search(r'p(\d+)', link.url)
-            if match:
-                page_num = int(match.group(1))
-                if page_num <= self.max_pages:
-                    filtered_links.append(link)
-            else:
-                filtered_links.append(link)
-                
-        return filtered_links
-
-    def start_requests(self):
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'nl,en-US;q=0.7,en;q=0.3',
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0',
-            'Referer': 'https://www.funda.nl/',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
             'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"macOS"'
         }
+
+    def start_requests(self):
         for url in self.start_urls:
             yield Request(
                 url=url,
-                headers=headers,
-                dont_filter=True,
-                meta={
-                    'dont_redirect': True,
-                    'handle_httpstatus_list': [302, 403],
-                    'download_timeout': 30
-                },
-                errback=self.errback_httpbin,
-                callback=self.initial_parse
+                headers=self.headers,
+                callback=self.parse,
+                meta={'dont_cache': True}
             )
 
-    def errback_httpbin(self, failure):
-        self.logger.error(f"Request failed: {failure.value}")
-
-    def check_if_blocked(self, response):
-        # Check response status
-        if response.status == 403:
-            self.logger.error(f"Blocked (403) on URL: {response.url}")
-            return True
+    def parse(self, response):
+        self.logger.info(f"Parsing page {self.page_count}")
         
-        # Check for CAPTCHA in the response
-        if "captcha" in response.text.lower():
-            self.logger.error(f"CAPTCHA detected on URL: {response.url}")
-            return True
+        # Check if we're being blocked or redirected
+        if response.status in [403, 302, 503]:
+            self.logger.error(f"Received status {response.status} for URL: {response.url}")
+            return
         
-        # Check for specific blocking messages
-        blocking_phrases = [
-            "access denied",
-            "blocked",
-            "too many requests",
-            "rate limit exceeded"
-        ]
+        # Extract listings from both JSON-LD and HTML
+        listing_urls = set()
         
-        for phrase in blocking_phrases:
-            if phrase in response.text.lower():
-                self.logger.error(f"Blocking phrase '{phrase}' found on URL: {response.url}")
-                return True
-            
-        # Check response headers for blocking indicators
-        headers = response.headers
-        if b'cf-ray' in headers or b'cf-cache-status' in headers:
-            self.logger.warning(f"CloudFlare protection detected on URL: {response.url}")
-            return True
+        # 1. Try JSON-LD first
+        json_ld_scripts = response.xpath('//script[@type="application/ld+json"]/text()').getall()
+        for script in json_ld_scripts:
+            try:
+                data = json.loads(script)
+                if isinstance(data, dict) and 'itemListElement' in data:
+                    items = data['itemListElement']
+                    for item in items:
+                        url = item.get('url')
+                        if url and '/detail/koop/' in url and url not in self.processed_urls:
+                            listing_urls.add(url)
+            except json.JSONDecodeError:
+                continue
         
-        return False
-
-    def initial_parse(self, response):
-        if self.check_if_blocked(response):
-            return None
+        # 2. Try HTML selectors as backup
+        html_listings = response.css('div[data-test-id="search-result-item"] a::attr(href)').getall()
+        html_listings.extend(response.css('div.search-result__header-title-col a::attr(href)').getall())
         
-        # Extract links and follow them
-        for rule in self._rules:
-            links = rule.link_extractor.extract_links(response)
-            for link in links:
-                yield Request(
-                    url=link.url,
-                    callback=self.parse_house if rule.callback else None,
-                    headers=response.request.headers,
-                    meta=response.meta
+        for url in html_listings:
+            if '/detail/koop/' in url and url not in self.processed_urls:
+                full_url = response.urljoin(url)
+                listing_urls.add(full_url)
+        
+        self.logger.info(f"Found {len(listing_urls)} new listings on page {self.page_count}")
+        
+        # Process found listings
+        for url in listing_urls:
+            self.processed_urls.add(url)
+            yield scrapy.Request(
+                url,
+                callback=self.parse_house,
+                headers=self.headers,
+                meta={'dont_cache': True}
+            )
+        
+        # Handle pagination if we haven't reached max_pages
+        if not self.max_pages or self.page_count < self.max_pages:
+            # Look for next page button
+            next_page = response.css('a[data-test-id="next-page-button"]::attr(href)').get()
+            if next_page:
+                self.page_count += 1
+                next_url = response.urljoin(next_page)
+                self.logger.info(f"Moving to page {self.page_count}")
+                yield scrapy.Request(
+                    next_url,
+                    callback=self.parse,
+                    headers=self.headers,
+                    meta={'dont_cache': True}
                 )
+            else:
+                # Fallback to manual page construction if next button not found
+                self.page_count += 1
+                next_page_params = self.base_params.copy()
+                next_page_params['page'] = self.page_count
+                next_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(next_page_params)}"
+                self.logger.info(f"Moving to page {self.page_count} (manual construction)")
+                yield scrapy.Request(
+                    next_url,
+                    callback=self.parse,
+                    headers=self.headers,
+                    meta={'dont_cache': True}
+                )
+        else:
+            self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
 
     def parse_house(self, response):
         # Check if we're being blocked
-        if self.check_if_blocked(response):
+        if response.status == 403:
+            self.logger.error(f"Blocked (403) on URL: {response.url}")
             return
 
-                item = FundaItem()
+        item = FundaItem()
         item['url'] = response.url
         item['status'] = 'active'
         item['scraped_at'] = datetime.now().isoformat()

@@ -178,7 +178,7 @@ class FundaSpiderSold(scrapy.Spider):
 
     def parse_listing(self, response):
         self.logger.info(f"Parsing listing page: {response.url}")
-                item = FundaItem()
+        item = FundaItem()
         item['url'] = response.url
 
         # Find all JSON-LD scripts

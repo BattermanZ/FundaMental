@@ -7,8 +7,8 @@ class FundaDB:
         if db_path is None:
             # Get the project root directory (parent of funda package)
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            # Construct path to database directory
-            db_dir = os.path.join(project_root, 'database')
+            # Construct path to server database directory
+            db_dir = os.path.join(project_root, 'server', 'database')
             # Create directory if it doesn't exist
             os.makedirs(db_dir, exist_ok=True)
             # Set database path
