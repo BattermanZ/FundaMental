@@ -2,13 +2,25 @@ import React, { useEffect, useState } from 'react';
 import { Property } from '../types/property';
 import { api } from '../services/api';
 import {
-    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+    Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
     BarChart, Bar, ScatterChart, Scatter, ResponsiveContainer,
-    PieChart, Pie, Cell
+    ComposedChart, Area, Label
 } from 'recharts';
 import { Box, Typography, CircularProgress, Paper, Grid } from '@mui/material';
+import * as d3 from 'd3';
+import PriceHeatmap from './PriceHeatmap';
 
-const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#a4de6c'];
+const COLORS = [
+    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+];
+
+interface PriceByPostalCodeData {
+    postal_code: string;
+    avg_price: number;
+    median_price: number;
+    count: number;
+}
 
 const PropertyCharts: React.FC = () => {
     const [properties, setProperties] = useState<Property[]>([]);
@@ -37,68 +49,93 @@ const PropertyCharts: React.FC = () => {
         fetchData();
     }, []);
 
-    const calculateMovingAverage = (data: any[], window: number) => {
-        return data.map((item, index) => {
-            const start = Math.max(0, index - window + 1);
-            const windowSlice = data.slice(start, index + 1);
-            const average = windowSlice.reduce((sum, curr) => sum + curr.price, 0) / windowSlice.length;
-            return {
-                ...item,
-                movingAverage: Math.round(average)
-            };
-        });
-    };
-
-    const preparePriceHistoryData = () => {
-        const soldProperties = properties
-            .filter(p => p.status === 'sold' && p.selling_date)
-            .sort((a, b) => new Date(a.selling_date).getTime() - new Date(b.selling_date).getTime());
-
-        const baseData = soldProperties.map(p => ({
-            date: new Date(p.selling_date).toLocaleDateString(),
-            price: p.price,
-            pricePerSqm: p.living_area ? Math.round(p.price / p.living_area) : null
-        }));
-
-        return calculateMovingAverage(baseData, 5);
-    };
-
-    const prepareSizeDistributionData = () => {
-        const sizeRanges = Array.from({ length: 10 }, (_, i) => ({
-            range: `${i * 20}-${(i + 1) * 20}`,
-            count: 0
-        }));
-
-        properties.forEach(p => {
-            if (p.living_area) {
-                const rangeIndex = Math.min(Math.floor(p.living_area / 20), 9);
-                sizeRanges[rangeIndex].count++;
-            }
-        });
-
-        return sizeRanges;
-    };
-
+    // Prepare data for Price vs Living Area Scatter Plot
     const preparePriceVsAreaData = () => {
         return properties
             .filter(p => p.living_area && p.price)
             .map(p => ({
-                area: p.living_area,
+                living_area: p.living_area,
                 price: p.price,
-                year: p.year_built
+                postal_code: p.postal_code.substring(0, 4),
+                num_rooms: p.num_rooms || 1,
+                price_per_sqm: p.price / p.living_area
             }));
     };
 
-    const preparePropertyTypeData = () => {
-        const typeCount: { [key: string]: number } = {};
-        properties.forEach(p => {
-            const type = p.property_type || 'Unknown';
-            typeCount[type] = (typeCount[type] || 0) + 1;
-        });
+    // Replace prepareBoxPlotData with new preparePriceByPostalCodeData
+    const preparePriceByPostalCodeData = () => {
+        const postalGroups = d3.group(
+            properties.filter(p => p.price),
+            d => d.postal_code.substring(0, 4)
+        );
 
-        return Object.entries(typeCount)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a, b) => b.value - a.value);
+        return Array.from(postalGroups, ([postal_code, group]) => ({
+            postal_code,
+            avg_price: d3.mean(group, d => d.price) || 0,
+            median_price: d3.median(group, d => d.price) || 0,
+            count: group.length
+        })).sort((a, b) => b.avg_price - a.avg_price);
+    };
+
+    // Prepare Time Series Data
+    const prepareTimeSeriesData = () => {
+        const soldProperties = properties
+            .filter(p => p.status === 'sold' && p.selling_date)
+            .sort((a, b) => new Date(a.selling_date).getTime() - new Date(b.selling_date).getTime());
+
+        // Group by month
+        const monthlyData = d3.group(soldProperties, d => 
+            new Date(d.selling_date).toISOString().substring(0, 7)
+        );
+
+        return Array.from(monthlyData, ([month, group]) => ({
+            month,
+            avg_price: d3.mean(group, d => d.price) || 0,
+            median_price: d3.median(group, d => d.price) || 0,
+            avg_days_to_sell: d3.mean(group, d => {
+                if (!d.listing_date || !d.selling_date) return null;
+                return (new Date(d.selling_date).getTime() - new Date(d.listing_date).getTime()) / (1000 * 60 * 60 * 24);
+            }) || 0,
+            count: group.length
+        }));
+    };
+
+    // Prepare Price per Square Meter Analysis
+    const preparePricePerSqmData = () => {
+        const postalGroups = d3.group(
+            properties.filter(p => p.living_area && p.price),
+            d => d.postal_code.substring(0, 4)
+        );
+
+        return Array.from(postalGroups, ([postal_code, group]) => ({
+            postal_code,
+            avg_price_per_sqm: d3.mean(group, d => d.price / d.living_area) || 0,
+            median_price_per_sqm: d3.median(group, d => d.price / d.living_area) || 0,
+            count: group.length
+        })).sort((a, b) => b.avg_price_per_sqm - a.avg_price_per_sqm);
+    };
+
+    // Calculate regression line for scatter plot
+    const calculateRegressionLine = (data: any[]) => {
+        const xValues = data.map(d => d.living_area);
+        const yValues = data.map(d => d.price);
+        
+        const xMean = d3.mean(xValues) || 0;
+        const yMean = d3.mean(yValues) || 0;
+        
+        const ssXX = d3.sum(xValues, x => Math.pow(x - xMean, 2));
+        const ssXY = d3.sum(data, d => (d.living_area - xMean) * (d.price - yMean));
+        
+        const slope = ssXY / ssXX;
+        const intercept = yMean - slope * xMean;
+        
+        const minX = Math.min(...xValues);
+        const maxX = Math.max(...xValues);
+        
+        return [
+            { x: minX, y: slope * minX + intercept },
+            { x: maxX, y: slope * maxX + intercept }
+        ];
     };
 
     if (loading) {
@@ -117,112 +154,194 @@ const PropertyCharts: React.FC = () => {
         );
     }
 
+    const scatterData = preparePriceVsAreaData();
+    const priceByPostalCodeData = preparePriceByPostalCodeData();
+    const timeSeriesData = prepareTimeSeriesData();
+    const pricePerSqmData = preparePricePerSqmData();
+    const regressionLine = calculateRegressionLine(scatterData);
+
     return (
         <Box mt={4}>
             <Grid container spacing={3}>
+                {/* Price vs Living Area Scatter Plot */}
                 <Grid item xs={12}>
-                    <Paper style={{ padding: 16 }}>
+                    <Paper sx={{ p: 3 }}>
                         <Typography variant="h6" gutterBottom>
-                            Price History
+                            Price vs Living Area
                         </Typography>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <LineChart data={preparePriceHistoryData()}>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="date" />
-                                <YAxis yAxisId="left" />
-                                <YAxis yAxisId="right" orientation="right" />
-                                <Tooltip />
+                                <XAxis 
+                                    dataKey="living_area" 
+                                    name="Living Area" 
+                                    unit="m²"
+                                    type="number"
+                                >
+                                    <Label value="Living Area (m²)" offset={-10} position="insideBottom" />
+                                </XAxis>
+                                <YAxis 
+                                    dataKey="price" 
+                                    name="Price" 
+                                    unit="€"
+                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                >
+                                    <Label value="Price (€)" angle={-90} position="insideLeft" offset={10} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any, name: string) => {
+                                        if (name === 'Price') return `€${Number(value).toLocaleString()}`;
+                                        if (name === 'Living Area') return `${value} m²`;
+                                        return value;
+                                    }}
+                                />
                                 <Legend />
-                                <Line
-                                    yAxisId="left"
-                                    type="monotone"
-                                    dataKey="price"
-                                    stroke="#8884d8"
-                                    name="Price (€)"
+                                <Scatter 
+                                    name="Properties" 
+                                    data={scatterData} 
+                                    fill="#8884d8"
                                 />
                                 <Line
-                                    yAxisId="left"
-                                    type="monotone"
-                                    dataKey="movingAverage"
-                                    stroke="#ff8042"
-                                    name="5-Day Moving Average (€)"
+                                    name="Regression Line"
+                                    data={regressionLine}
+                                    dataKey="y"
+                                    stroke="#ff7300"
                                     dot={false}
                                 />
-                                <Line
-                                    yAxisId="right"
-                                    type="monotone"
-                                    dataKey="pricePerSqm"
-                                    stroke="#82ca9d"
-                                    name="Price per m² (€)"
-                                />
-                            </LineChart>
+                            </ScatterChart>
                         </ResponsiveContainer>
                     </Paper>
                 </Grid>
 
-                <Grid item xs={12} md={4}>
-                    <Paper style={{ padding: 16 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Property Types
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <PieChart>
-                                <Pie
-                                    data={preparePropertyTypeData()}
-                                    dataKey="value"
-                                    nameKey="name"
-                                    cx="50%"
-                                    cy="50%"
-                                    outerRadius={80}
-                                    label={(entry) => `${entry.name}: ${entry.value}`}
-                                >
-                                    {preparePropertyTypeData().map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip />
-                                <Legend />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </Paper>
+                {/* Price Heatmaps */}
+                <Grid item xs={12}>
+                    <PriceHeatmap properties={properties} metric="price" />
+                </Grid>
+                <Grid item xs={12}>
+                    <PriceHeatmap properties={properties} metric="price_per_sqm" />
                 </Grid>
 
-                <Grid item xs={12} md={4}>
-                    <Paper style={{ padding: 16 }}>
+                {/* Price by Postal Code */}
+                <Grid item xs={12}>
+                    <Paper sx={{ p: 3 }}>
                         <Typography variant="h6" gutterBottom>
-                            Size Distribution
+                            Price by Postal Code
                         </Typography>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <BarChart data={prepareSizeDistributionData()}>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <BarChart data={priceByPostalCodeData} margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="range" />
-                                <YAxis />
-                                <Tooltip />
+                                <XAxis dataKey="postal_code" />
+                                <YAxis 
+                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                >
+                                    <Label value="Price (€)" angle={-90} position="insideLeft" offset={10} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any) => `€${Number(value).toLocaleString()}`}
+                                />
                                 <Legend />
-                                <Bar dataKey="count" fill="#8884d8" name="Number of Properties" />
+                                <Bar 
+                                    dataKey="avg_price" 
+                                    fill="#8884d8" 
+                                    name="Average Price"
+                                />
+                                <Bar 
+                                    dataKey="median_price" 
+                                    fill="#82ca9d" 
+                                    name="Median Price"
+                                />
                             </BarChart>
                         </ResponsiveContainer>
                     </Paper>
                 </Grid>
 
-                <Grid item xs={12} md={4}>
-                    <Paper style={{ padding: 16 }}>
+                {/* Time Series */}
+                <Grid item xs={12}>
+                    <Paper sx={{ p: 3 }}>
                         <Typography variant="h6" gutterBottom>
-                            Price vs Area
+                            Price Trends Over Time
                         </Typography>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <ScatterChart>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <ComposedChart data={timeSeriesData} margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="area" name="Living Area (m²)" />
-                                <YAxis dataKey="price" name="Price (€)" />
-                                <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                                <Legend />
-                                <Scatter
-                                    name="Properties"
-                                    data={preparePriceVsAreaData()}
-                                    fill="#8884d8"
+                                <XAxis dataKey="month" />
+                                <YAxis 
+                                    yAxisId="left"
+                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                >
+                                    <Label value="Price (€)" angle={-90} position="insideLeft" offset={10} />
+                                </YAxis>
+                                <YAxis 
+                                    yAxisId="right" 
+                                    orientation="right"
+                                    label={{ value: 'Days to Sell', angle: 90, position: 'insideRight' }}
                                 />
-                            </ScatterChart>
+                                <Tooltip />
+                                <Legend />
+                                <Line
+                                    yAxisId="left"
+                                    type="monotone"
+                                    dataKey="avg_price"
+                                    stroke="#8884d8"
+                                    name="Average Price"
+                                />
+                                <Line
+                                    yAxisId="left"
+                                    type="monotone"
+                                    dataKey="median_price"
+                                    stroke="#82ca9d"
+                                    name="Median Price"
+                                />
+                                <Line
+                                    yAxisId="right"
+                                    type="monotone"
+                                    dataKey="avg_days_to_sell"
+                                    stroke="#ffc658"
+                                    name="Avg Days to Sell"
+                                />
+                                <Area
+                                    yAxisId="left"
+                                    type="monotone"
+                                    dataKey="count"
+                                    fill="#8884d8"
+                                    opacity={0.1}
+                                    name="Number of Sales"
+                                />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </Paper>
+                </Grid>
+
+                {/* Price per Square Meter Analysis */}
+                <Grid item xs={12}>
+                    <Paper sx={{ p: 3 }}>
+                        <Typography variant="h6" gutterBottom>
+                            Price per Square Meter by Postal Code
+                        </Typography>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <BarChart data={pricePerSqmData} margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="postal_code" />
+                                <YAxis 
+                                    tickFormatter={(value) => `€${value.toFixed(0)}`}
+                                >
+                                    <Label value="Price per m² (€)" angle={-90} position="insideLeft" offset={10} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any) => `€${Number(value).toFixed(0)}/m²`}
+                                />
+                                <Legend />
+                                <Bar 
+                                    dataKey="avg_price_per_sqm" 
+                                    fill="#8884d8" 
+                                    name="Average Price/m²"
+                                />
+                                <Bar 
+                                    dataKey="median_price_per_sqm" 
+                                    fill="#82ca9d" 
+                                    name="Median Price/m²"
+                                />
+                            </BarChart>
                         </ResponsiveContainer>
                     </Paper>
                 </Grid>
