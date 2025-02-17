@@ -6,7 +6,13 @@ import {
     BarChart, Bar, ScatterChart, Scatter, ResponsiveContainer,
     ComposedChart, Area, Label
 } from 'recharts';
-import { Box, Typography, CircularProgress, Paper, Grid } from '@mui/material';
+import { 
+    Box, Typography, CircularProgress, Paper, Grid,
+    FormControl, InputLabel, Select, MenuItem,
+    Slider, Stack, TextField, Button
+} from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import dayjs, { Dayjs } from 'dayjs';
 import * as d3 from 'd3';
 import PriceHeatmap from './PriceHeatmap';
 
@@ -22,11 +28,43 @@ interface PriceByPostalCodeData {
     count: number;
 }
 
+interface FilterOptions {
+    startDate: Dayjs | null;
+    endDate: Dayjs | null;
+    propertyType: string;
+    status: string;
+    numRooms: [number, number];
+    priceRange: [number, number];
+    sizeRange: [number, number];
+}
+
 const PropertyCharts: React.FC = () => {
     const [properties, setProperties] = useState<Property[]>([]);
+    const [filteredProperties, setFilteredProperties] = useState<Property[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    
+    // Separate current filters and pending filters
+    const [filters, setFilters] = useState<FilterOptions>({
+        startDate: null,
+        endDate: null,
+        propertyType: 'all',
+        status: 'all',
+        numRooms: [1, 10],
+        priceRange: [0, 2000000],
+        sizeRange: [0, 300]
+    });
+    
+    const [pendingFilters, setPendingFilters] = useState<FilterOptions>(filters);
+    
+    // Range limits for sliders
+    const [ranges, setRanges] = useState({
+        price: { min: 0, max: 2000000 },
+        size: { min: 0, max: 300 },
+        rooms: { min: 1, max: 10 }
+    });
 
+    // Fetch data
     useEffect(() => {
         const fetchData = async () => {
             try {
@@ -36,7 +74,47 @@ const PropertyCharts: React.FC = () => {
                     endDate: undefined
                 };
                 const data = await api.getAllProperties(defaultDateRange);
-                setProperties(data);
+                
+                // Filter out properties with price 0
+                const validData = data.filter(p => p.price > 0);
+                setProperties(validData);
+                
+                // Calculate actual ranges from data
+                const prices = validData.map(p => p.price).filter(Boolean);
+                const sizes = validData.map(p => p.living_area).filter(Boolean);
+                const rooms = validData.map(p => p.num_rooms).filter(Boolean);
+                
+                const newRanges = {
+                    price: {
+                        min: Math.min(...prices),
+                        max: Math.max(...prices)
+                    },
+                    size: {
+                        min: Math.min(...sizes),
+                        max: Math.max(...sizes)
+                    },
+                    rooms: {
+                        min: Math.min(...rooms),
+                        max: Math.max(...rooms)
+                    }
+                };
+                
+                setRanges(newRanges);
+                
+                // Initialize filters with actual ranges
+                const initialFilters: FilterOptions = {
+                    startDate: null,
+                    endDate: null,
+                    propertyType: 'all',
+                    status: 'all',
+                    numRooms: [newRanges.rooms.min, newRanges.rooms.max] as [number, number],
+                    priceRange: [newRanges.price.min, newRanges.price.max] as [number, number],
+                    sizeRange: [newRanges.size.min, newRanges.size.max] as [number, number]
+                };
+                
+                setFilters(initialFilters);
+                setPendingFilters(initialFilters);
+                
                 setError(null);
             } catch (error) {
                 console.error('Failed to fetch properties:', error);
@@ -49,9 +127,78 @@ const PropertyCharts: React.FC = () => {
         fetchData();
     }, []);
 
+    // Apply filters
+    const applyFilters = () => {
+        setFilters(pendingFilters);
+        const filtered = properties.filter(property => {
+            // Date filter - check both listing_date and selling_date
+            if (pendingFilters.startDate) {
+                const listingDate = dayjs(property.listing_date);
+                const sellingDate = property.selling_date ? dayjs(property.selling_date) : null;
+                
+                // For sold properties, check selling_date
+                if (property.status === 'sold' && sellingDate) {
+                    if (sellingDate.isBefore(pendingFilters.startDate)) return false;
+                } else {
+                    // For active properties, check listing_date
+                    if (listingDate.isBefore(pendingFilters.startDate)) return false;
+                }
+            }
+            
+            if (pendingFilters.endDate) {
+                const listingDate = dayjs(property.listing_date);
+                const sellingDate = property.selling_date ? dayjs(property.selling_date) : null;
+                
+                // For sold properties, check selling_date
+                if (property.status === 'sold' && sellingDate) {
+                    if (sellingDate.isAfter(pendingFilters.endDate)) return false;
+                } else {
+                    // For active properties, check listing_date
+                    if (listingDate.isAfter(pendingFilters.endDate)) return false;
+                }
+            }
+            
+            // Rest of the filter conditions remain the same
+            if (pendingFilters.propertyType !== 'all' && property.property_type !== pendingFilters.propertyType) return false;
+            if (pendingFilters.status !== 'all' && property.status !== pendingFilters.status) return false;
+            if (property.num_rooms && (
+                property.num_rooms < pendingFilters.numRooms[0] ||
+                property.num_rooms > pendingFilters.numRooms[1]
+            )) return false;
+            if (property.price && (
+                property.price < pendingFilters.priceRange[0] ||
+                property.price > pendingFilters.priceRange[1]
+            )) return false;
+            if (property.living_area && (
+                property.living_area < pendingFilters.sizeRange[0] ||
+                property.living_area > pendingFilters.sizeRange[1]
+            )) return false;
+            
+            return true;
+        });
+        
+        setFilteredProperties(filtered);
+    };
+
+    // Reset filters
+    const resetFilters = () => {
+        const resetValues: FilterOptions = {
+            startDate: null,
+            endDate: null,
+            propertyType: 'all',
+            status: 'all',
+            numRooms: [ranges.rooms.min, ranges.rooms.max] as [number, number],
+            priceRange: [ranges.price.min, ranges.price.max] as [number, number],
+            sizeRange: [ranges.size.min, ranges.size.max] as [number, number]
+        };
+        setPendingFilters(resetValues);
+        setFilters(resetValues);
+        setFilteredProperties(properties);
+    };
+
     // Prepare data for Price vs Living Area Scatter Plot
     const preparePriceVsAreaData = () => {
-        return properties
+        return filteredProperties
             .filter(p => p.living_area && p.price)
             .map(p => ({
                 living_area: p.living_area,
@@ -65,7 +212,7 @@ const PropertyCharts: React.FC = () => {
     // Replace prepareBoxPlotData with new preparePriceByPostalCodeData
     const preparePriceByPostalCodeData = () => {
         const postalGroups = d3.group(
-            properties.filter(p => p.price),
+            filteredProperties.filter(p => p.price),
             d => d.postal_code.substring(0, 4)
         );
 
@@ -79,31 +226,50 @@ const PropertyCharts: React.FC = () => {
 
     // Prepare Time Series Data
     const prepareTimeSeriesData = () => {
-        const soldProperties = properties
+        const soldProperties = filteredProperties
             .filter(p => p.status === 'sold' && p.selling_date)
             .sort((a, b) => new Date(a.selling_date).getTime() - new Date(b.selling_date).getTime());
 
+        // Group by month and ensure we have at least one property
+        if (soldProperties.length === 0) return [];
+
+        // Get the date range
+        const startDate = dayjs(soldProperties[0].selling_date).startOf('month');
+        const endDate = dayjs(soldProperties[soldProperties.length - 1].selling_date).endOf('month');
+        
+        // Create array of all months in range
+        const months: string[] = [];
+        let currentDate = startDate;
+        while (currentDate.isBefore(endDate) || currentDate.isSame(endDate, 'month')) {
+            months.push(currentDate.format('YYYY-MM'));
+            currentDate = currentDate.add(1, 'month');
+        }
+
         // Group by month
-        const monthlyData = d3.group(soldProperties, d => 
-            new Date(d.selling_date).toISOString().substring(0, 7)
+        const monthlyGroups = d3.group(soldProperties, d => 
+            dayjs(d.selling_date).format('YYYY-MM')
         );
 
-        return Array.from(monthlyData, ([month, group]) => ({
-            month,
-            avg_price: d3.mean(group, d => d.price) || 0,
-            median_price: d3.median(group, d => d.price) || 0,
-            avg_days_to_sell: d3.mean(group, d => {
-                if (!d.listing_date || !d.selling_date) return null;
-                return (new Date(d.selling_date).getTime() - new Date(d.listing_date).getTime()) / (1000 * 60 * 60 * 24);
-            }) || 0,
-            count: group.length
-        }));
+        // Create data for each month, including months with no sales
+        return months.map(month => {
+            const group = monthlyGroups.get(month) || [];
+            return {
+                month,
+                avg_price: d3.mean(group, d => d.price) || 0,
+                median_price: d3.median(group, d => d.price) || 0,
+                avg_days_to_sell: d3.mean(group, d => {
+                    if (!d.listing_date || !d.selling_date) return null;
+                    return (new Date(d.selling_date).getTime() - new Date(d.listing_date).getTime()) / (1000 * 60 * 60 * 24);
+                }) || 0,
+                count: group.length
+            };
+        });
     };
 
     // Prepare Price per Square Meter Analysis
     const preparePricePerSqmData = () => {
         const postalGroups = d3.group(
-            properties.filter(p => p.living_area && p.price),
+            filteredProperties.filter(p => p.living_area && p.price),
             d => d.postal_code.substring(0, 4)
         );
 
@@ -138,6 +304,112 @@ const PropertyCharts: React.FC = () => {
         ];
     };
 
+    const FilterPanel = () => (
+        <Paper sx={{ p: 3, mb: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                    Filters
+                </Typography>
+                <Box>
+                    <Button 
+                        variant="outlined" 
+                        onClick={resetFilters} 
+                        sx={{ mr: 1 }}
+                    >
+                        Reset
+                    </Button>
+                    <Button 
+                        variant="contained" 
+                        onClick={applyFilters}
+                    >
+                        Apply Filters
+                    </Button>
+                </Box>
+            </Box>
+            <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                    <Stack spacing={2}>
+                        <DatePicker
+                            label="Start Date"
+                            value={pendingFilters.startDate}
+                            onChange={(newValue) => setPendingFilters(prev => ({ ...prev, startDate: newValue }))}
+                            slotProps={{ textField: { fullWidth: true } }}
+                        />
+                        <DatePicker
+                            label="End Date"
+                            value={pendingFilters.endDate}
+                            onChange={(newValue) => setPendingFilters(prev => ({ ...prev, endDate: newValue }))}
+                            slotProps={{ textField: { fullWidth: true } }}
+                        />
+                    </Stack>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                    <Stack spacing={2}>
+                        <FormControl fullWidth>
+                            <InputLabel>Property Type</InputLabel>
+                            <Select
+                                value={pendingFilters.propertyType}
+                                label="Property Type"
+                                onChange={(e) => setPendingFilters(prev => ({ ...prev, propertyType: e.target.value }))}
+                            >
+                                <MenuItem value="all">All</MenuItem>
+                                <MenuItem value="appartement">Apartment</MenuItem>
+                                <MenuItem value="huis">House</MenuItem>
+                            </Select>
+                        </FormControl>
+                        <FormControl fullWidth>
+                            <InputLabel>Status</InputLabel>
+                            <Select
+                                value={pendingFilters.status}
+                                label="Status"
+                                onChange={(e) => setPendingFilters(prev => ({ ...prev, status: e.target.value }))}
+                            >
+                                <MenuItem value="all">All</MenuItem>
+                                <MenuItem value="active">Active</MenuItem>
+                                <MenuItem value="sold">Sold</MenuItem>
+                            </Select>
+                        </FormControl>
+                    </Stack>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                    <Typography gutterBottom>Number of Rooms</Typography>
+                    <Slider
+                        value={pendingFilters.numRooms}
+                        onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, numRooms: newValue as [number, number] }))}
+                        valueLabelDisplay="auto"
+                        min={ranges.rooms.min}
+                        max={ranges.rooms.max}
+                        marks
+                    />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                    <Typography gutterBottom>Price Range (€)</Typography>
+                    <Slider
+                        value={pendingFilters.priceRange}
+                        onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, priceRange: newValue as [number, number] }))}
+                        valueLabelDisplay="auto"
+                        min={ranges.price.min}
+                        max={ranges.price.max}
+                        step={50000}
+                        valueLabelFormat={(value) => `€${(value/1000)}k`}
+                    />
+                </Grid>
+                <Grid item xs={12} md={4}>
+                    <Typography gutterBottom>Size Range (m²)</Typography>
+                    <Slider
+                        value={pendingFilters.sizeRange}
+                        onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, sizeRange: newValue as [number, number] }))}
+                        valueLabelDisplay="auto"
+                        min={ranges.size.min}
+                        max={ranges.size.max}
+                        step={5}
+                        valueLabelFormat={(value) => `${value}m²`}
+                    />
+                </Grid>
+            </Grid>
+        </Paper>
+    );
+
     if (loading) {
         return (
             <Box display="flex" justifyContent="center" alignItems="center" height="400px">
@@ -162,6 +434,7 @@ const PropertyCharts: React.FC = () => {
 
     return (
         <Box mt={4}>
+            <FilterPanel />
             <Grid container spacing={3}>
                 {/* Price vs Living Area Scatter Plot */}
                 <Grid item xs={12}>
@@ -215,7 +488,7 @@ const PropertyCharts: React.FC = () => {
 
                 {/* Price Heatmap */}
                 <Grid item xs={12}>
-                    <PriceHeatmap properties={properties} />
+                    <PriceHeatmap properties={filteredProperties} />
                 </Grid>
 
                 {/* Price by Postal Code */}
