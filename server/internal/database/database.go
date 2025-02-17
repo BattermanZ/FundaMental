@@ -490,3 +490,51 @@ func (d *Database) UpdateMissingCoordinates(geocoder *geocoding.Geocoder) error 
 func (d *Database) GetDB() *sql.DB {
 	return d.db
 }
+
+// InsertProperties inserts a batch of properties into the database
+func (d *Database) InsertProperties(properties []map[string]interface{}) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO properties 
+		(url, street, neighborhood, property_type, city, postal_code, price, year_built, 
+		 living_area, num_rooms, status, listing_date, selling_date, scraped_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, prop := range properties {
+		_, err = stmt.Exec(
+			prop["url"],
+			prop["street"],
+			prop["neighborhood"],
+			prop["property_type"],
+			prop["city"],
+			prop["postal_code"],
+			prop["price"],
+			prop["year_built"],
+			prop["living_area"],
+			prop["num_rooms"],
+			prop["status"],
+			prop["listing_date"],
+			prop["selling_date"],
+			prop["scraped_at"],
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert property: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}

@@ -4,6 +4,7 @@ import (
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
 	"fundamental/server/internal/geometry"
+	"fundamental/server/internal/scraping"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,11 +19,18 @@ type Handler struct {
 	logger          *logrus.Logger
 	geocoder        *geocoding.Geocoder
 	districtManager *geometry.DistrictManager
+	spiderManager   *scraping.SpiderManager
 }
 
 type DateRange struct {
 	StartDate string `form:"startDate"`
 	EndDate   string `form:"endDate"`
+}
+
+type SpiderRequest struct {
+	Place    string `json:"place" binding:"required"`
+	MaxPages *int   `json:"max_pages"`
+	Resume   bool   `json:"resume"`
 }
 
 func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
@@ -37,11 +45,15 @@ func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 	// Initialize the district manager
 	districtManager := geometry.NewDistrictManager(db.GetDB(), logger)
 
+	// Initialize the spider manager
+	spiderManager := scraping.NewSpiderManager(logger)
+
 	return &Handler{
 		db:              db,
 		logger:          logger,
 		geocoder:        geocoding.NewGeocoder(logger, cacheDir),
 		districtManager: districtManager,
+		spiderManager:   spiderManager,
 	}
 }
 
@@ -139,5 +151,47 @@ func (h *Handler) UpdateDistrictHulls(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": "District hulls updated successfully",
+	})
+}
+
+func (h *Handler) RunActiveSpider(c *gin.Context) {
+	var req SpiderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.WithError(err).Error("Failed to parse spider request")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
+		return
+	}
+
+	err := h.spiderManager.RunActiveSpider(req.Place, req.MaxPages)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to run active spider")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to run spider"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Active spider started successfully",
+	})
+}
+
+func (h *Handler) RunSoldSpider(c *gin.Context) {
+	var req SpiderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.WithError(err).Error("Failed to parse spider request")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
+		return
+	}
+
+	err := h.spiderManager.RunSoldSpider(req.Place, req.MaxPages, req.Resume)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to run sold spider")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to run spider"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Sold spider started successfully",
 	})
 }

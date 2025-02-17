@@ -12,10 +12,12 @@ func SetupRoutes(router *gin.Engine, db *database.Database) {
 	api := router.Group("/api")
 	{
 		api.GET("/properties", handler.GetAllProperties)
-		api.GET("/stats", handler.GetPropertyStats)
-		api.GET("/areas/:postal_prefix", handler.GetAreaStats)
-		api.GET("/recent-sales", handler.GetRecentSales)
-		api.POST("/update-coordinates", handler.UpdateCoordinates)
-		api.POST("/update-district-hulls", handler.UpdateDistrictHulls)
+		api.GET("/properties/stats", handler.GetPropertyStats)
+		api.GET("/properties/recent", handler.GetRecentSales)
+		api.GET("/properties/area/:postal_prefix", handler.GetAreaStats)
+		api.POST("/geocode/update", handler.UpdateCoordinates)
+		api.POST("/districts/update", handler.UpdateDistrictHulls)
+		api.POST("/spiders/active", handler.RunActiveSpider)
+		api.POST("/spiders/sold", handler.RunSoldSpider)
 	}
 }
