@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"fundamental/server/internal/geocoding"
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,6 +19,7 @@ type SpiderManager struct {
 	logger     *logrus.Logger
 	scriptPath string
 	db         *database.Database
+	geocoder   *geocoding.Geocoder
 }
 
 // SpiderParams contains parameters for running a spider
@@ -49,10 +52,15 @@ func NewSpiderManager(db *database.Database, logger *logrus.Logger) *SpiderManag
 		logger.WithError(err).Error("Failed to get absolute path to spider script")
 	}
 
+	// Initialize geocoder
+	cacheDir := filepath.Join(os.TempDir(), "fundamental", "geocode_cache")
+	geocoder := geocoding.NewGeocoder(logger, cacheDir)
+
 	return &SpiderManager{
 		logger:     logger,
 		scriptPath: absPath,
 		db:         db,
+		geocoder:   geocoder,
 	}
 }
 
@@ -132,6 +140,14 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 				// Process items using InsertProperties
 				if err := m.db.InsertProperties(items); err != nil {
 					m.logger.WithError(err).Error("Failed to store properties")
+				} else {
+					// After successful insertion, trigger geocoding in a background goroutine
+					go func() {
+						m.logger.Info("Starting geocoding for newly inserted properties...")
+						if err := m.db.UpdateMissingCoordinates(m.geocoder); err != nil {
+							m.logger.WithError(err).Error("Failed to update coordinates for new properties")
+						}
+					}()
 				}
 			case "error":
 				var errorData map[string]interface{}
