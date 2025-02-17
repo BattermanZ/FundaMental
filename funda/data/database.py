@@ -142,4 +142,11 @@ class FundaDB:
             ''', (limit,))
             
             columns = [description[0] for description in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()] 
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_existing_urls(self):
+        """Get all existing URLs from the database."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT url FROM properties')
+            return {row[0] for row in cursor.fetchall()}  # Return as a set for O(1) lookups 

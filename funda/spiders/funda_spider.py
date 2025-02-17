@@ -2,6 +2,7 @@ import re
 import scrapy
 from scrapy.http import Request
 from funda.core.items import FundaItem
+from funda.data.database import FundaDB
 import json
 import random
 from datetime import datetime
@@ -10,28 +11,42 @@ import urllib.parse
 class FundaSpider(scrapy.Spider):
     name = "funda_spider"
     allowed_domains = ["funda.nl"]
+    
+    custom_settings = {
+        'DOWNLOAD_DELAY': 2,  # 2 seconds between requests is more reasonable
+        'CONCURRENT_REQUESTS': 2,  # Allow 2 concurrent requests
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
+        'AUTOTHROTTLE_ENABLED': True,
+        'AUTOTHROTTLE_START_DELAY': 2,
+        'AUTOTHROTTLE_MAX_DELAY': 30,
+        'AUTOTHROTTLE_TARGET_CONCURRENCY': 2.0,
+        'DOWNLOAD_TIMEOUT': 30
+    }
 
     def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.place = place
-        # Set default max_pages to None if not specified
         self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
-        self.processed_urls = set()  # Track processed URLs
+        self.processed_urls = set()  # Track processed URLs in current run
+        self.db = FundaDB()  # Initialize database connection
+        self.existing_urls = self.db.get_existing_urls()  # Get existing URLs from database
         self.total_items_scraped = 0
+        self.new_items_found = 0  # Track new items found
         
         # Base parameters for the search
         self.base_params = {
             'selected_area': json.dumps([place]),
             'availability': json.dumps(['available']),
             'object_type': json.dumps(['house', 'apartment']),
-            'sort': 'date_down'
+            'sort': 'date_down'  # Most recent first
         }
         
         base_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(self.base_params)}"
         self.start_urls = [base_url]
         self.logger.info(f"Initial URL: {base_url}")
         self.logger.info(f"Maximum pages to scrape: {self.max_pages}")
+        self.logger.info(f"Found {len(self.existing_urls)} existing URLs in database")
 
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -75,7 +90,7 @@ class FundaSpider(scrapy.Spider):
                     items = data['itemListElement']
                     for item in items:
                         url = item.get('url')
-                        if url and '/detail/koop/' in url and url not in self.processed_urls:
+                        if url and '/detail/koop/' in url and url not in self.processed_urls and url not in self.existing_urls:
                             listing_urls.add(url)
             except json.JSONDecodeError:
                 continue
@@ -85,11 +100,13 @@ class FundaSpider(scrapy.Spider):
         html_listings.extend(response.css('div.search-result__header-title-col a::attr(href)').getall())
         
         for url in html_listings:
-            if '/detail/koop/' in url and url not in self.processed_urls:
+            if '/detail/koop/' in url and url not in self.processed_urls and url not in self.existing_urls:
                 full_url = response.urljoin(url)
                 listing_urls.add(full_url)
         
-        self.logger.info(f"Found {len(listing_urls)} new listings on page {self.page_count}")
+        new_listings = len(listing_urls)
+        self.new_items_found += new_listings
+        self.logger.info(f"Found {new_listings} new listings on page {self.page_count}")
         
         # Process found listings
         for url in listing_urls:
@@ -100,6 +117,11 @@ class FundaSpider(scrapy.Spider):
                 headers=self.headers,
                 meta={'dont_cache': True}
             )
+        
+        # If we found no new listings on this page, stop crawling
+        if not listing_urls:
+            self.logger.info(f"No new listings found on page {self.page_count}. Stopping crawl.")
+            return
         
         # Handle pagination if we haven't reached max_pages
         if not self.max_pages or self.page_count < self.max_pages:
@@ -133,8 +155,8 @@ class FundaSpider(scrapy.Spider):
 
     def parse_house(self, response):
         # Check if we're being blocked
-        if response.status == 403:
-            self.logger.error(f"Blocked (403) on URL: {response.url}")
+        if response.status == 403 or "Je bent bijna op de pagina die je zoekt" in response.text:
+            self.logger.error(f"Blocked or verification required for URL: {response.url}")
             return
 
         item = FundaItem()
@@ -142,61 +164,67 @@ class FundaSpider(scrapy.Spider):
         item['status'] = 'active'
         item['scraped_at'] = datetime.now().isoformat()
         
-        # Extract property type and street from URL
-        # Example URL: https://www.funda.nl/detail/koop/amsterdam/appartement-van-beuningenstraat-144-3/43801086/
-        url_parts = response.url.split('/')
-        self.logger.info(f"URL parts: {url_parts}")
+        # Extract address from the page content
+        # Try multiple selectors for the address
+        address_selectors = [
+            'h1.object-header__title::text',  # Main title
+            'h1.object-header__container span.object-header__title::text',  # New title format
+            'h1.object-header__container span.object-header__street::text',  # Street only
+            'h1.object-header__container span.object-header__house-number::text',  # House number
+            'div.object-header__details h1 span::text',  # Alternative format
+            'div.object-header__details-info h1.fd-m-none::text',  # Another format
+        ]
         
-        for i, part in enumerate(url_parts):
-            if part.startswith('appartement-') or part.startswith('huis-'):
-                # Extract property type
-                property_type = 'appartement' if part.startswith('appartement-') else 'huis'
-                item['property_type'] = property_type
-                self.logger.info(f"Found property type: {property_type}")
-                
-                # Extract street address
-                address_part = part[len(property_type)+1:].rsplit('-', 1)[0]
-                self.logger.info(f"Raw address part: {address_part}")
-                
-                # Convert hyphens to spaces and capitalize
-                street_parts = address_part.split('-')
-                self.logger.info(f"Street parts: {street_parts}")
-                
-                # Combine number and any additions (like 102-1)
-                if len(street_parts) >= 2:
-                    street_name = ' '.join(street_parts[:-1])
-                    number_part = street_parts[-1]
-                    item['street'] = f"{street_name} {number_part}"
-                else:
-                    item['street'] = ' '.join(street_parts)
-                
-                self.logger.info(f"Extracted street: {item['street']}")
-                break
-            elif part.startswith('appartement') or part == 'huis':
-                item['property_type'] = part
-                self.logger.info(f"Found property type: {part}")
-                
-                # The next part should contain the street address
-                if i + 1 < len(url_parts):
-                    next_part = url_parts[i + 1]
-                    address_part = next_part.rsplit('-', 1)[0]
-                    self.logger.info(f"Raw address part: {address_part}")
-                    
-                    # Convert hyphens to spaces and capitalize
-                    street_parts = address_part.split('-')
-                    self.logger.info(f"Street parts: {street_parts}")
-                    
-                    # Combine number and any additions (like 102-1)
-                    if len(street_parts) >= 2:
-                        street_name = ' '.join(street_parts[:-1])
-                        number_part = street_parts[-1]
-                        item['street'] = f"{street_name} {number_part}"
-                    else:
-                        item['street'] = ' '.join(street_parts)
-                    
-                    self.logger.info(f"Extracted street: {item['street']}")
-                break
+        # First try to get street and house number separately
+        street = response.css('h1.object-header__container span.object-header__street::text').get()
+        house_number = response.css('h1.object-header__container span.object-header__house-number::text').get()
         
+        if street and house_number:
+            item['street'] = f"{street.strip()} {house_number.strip()}"
+            self.logger.info(f"Extracted street from separate components: {item['street']}")
+        else:
+            # Try to get full address from other selectors
+            for selector in address_selectors:
+                address = response.css(selector).get()
+                if address:
+                    address = address.strip()
+                    self.logger.info(f"Found address with selector '{selector}': {address}")
+                    # Extract street name and number
+                    # Pattern matches street name followed by number, handling various formats
+                    match = re.match(r'^(.*?)\s*(\d+(?:\s*[a-zA-Z-]?\d*)?)\s*$', address)
+                    if match:
+                        street_name, number = match.groups()
+                        item['street'] = f"{street_name.strip()} {number.strip()}"
+                        self.logger.info(f"Extracted street: {item['street']}")
+                        break
+
+        # If we still don't have a street address, try JSON-LD
+        if not item.get('street'):
+            try:
+                json_ld_script = response.css('script[type="application/ld+json"]::text').getall()
+                for script in json_ld_script:
+                    data = json.loads(script)
+                    if isinstance(data, dict) and 'address' in data:
+                        street_address = data['address'].get('streetAddress')
+                        if street_address:
+                            item['street'] = street_address.strip()
+                            self.logger.info(f"Extracted street from JSON-LD: {item['street']}")
+                            break
+            except (json.JSONDecodeError, KeyError, AttributeError) as e:
+                self.logger.warning(f"Failed to extract address from JSON-LD: {e}")
+
+        # Extract property type from breadcrumbs or JSON-LD
+        property_type_selectors = [
+            'nav[aria-label="Breadcrumb"] span:contains("appartement")::text',
+            'nav[aria-label="Breadcrumb"] span:contains("huis")::text'
+        ]
+        
+        for selector in property_type_selectors:
+            property_type = response.css(selector).get()
+            if property_type:
+                item['property_type'] = property_type.strip().lower()
+                break
+
         # Extract data from JSON-LD
         json_ld = None
         try:
@@ -324,3 +352,9 @@ class FundaSpider(scrapy.Spider):
         self.logger.info(f"Extracted data: {item}")
         
         return item
+
+    def closed(self, reason):
+        """Called when the spider is closed."""
+        self.logger.info(f"Spider closed: {reason}")
+        self.logger.info(f"Total new items found: {self.new_items_found}")
+        self.logger.info(f"Total items scraped: {self.total_items_scraped}")
