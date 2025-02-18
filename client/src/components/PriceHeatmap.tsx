@@ -7,6 +7,13 @@ import { Box, Typography, Paper, ButtonGroup, Button } from '@mui/material';
 
 type MapView = 'price' | 'price_per_sqm' | 'density';
 
+// Move formatValue to be a standalone function
+const formatValue = (value: number, type: 'price' | 'price_per_sqm' | 'count') => {
+    if (type === 'price') return `€${Math.round(value).toLocaleString()}`;
+    if (type === 'price_per_sqm') return `€${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}/m²`;
+    return `${value.toLocaleString()} properties`;
+};
+
 interface PriceHeatmapProps {
     properties: Property[];
     metric?: 'price' | 'price_per_sqm' | 'density';  // Optional prop to set initial view
@@ -32,11 +39,11 @@ const Legend: React.FC<{ min: number; max: number; metric: string }> = ({ min, m
         .domain([min, max])
         .interpolator((t) => d3.interpolateRdYlGn(1 - t)); // Reverse the scale to get green-to-red
 
-    const formatValue = (value: number) => {
+    const formatLegendValue = (value: number) => {
         if (metric === 'price') {
-            return `€${(value/1000).toFixed(0)}k`;
+            return `€${Math.round(value).toLocaleString()}`;
         }
-        return `€${value.toFixed(0)}/m²`;
+        return `€${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}/m²`;
     };
 
     return (
@@ -68,7 +75,7 @@ const Legend: React.FC<{ min: number; max: number; metric: string }> = ({ min, m
                             }}
                         />
                         <Typography variant="caption">
-                            {formatValue(value)}
+                            {formatLegendValue(value)}
                         </Typography>
                     </Box>
                 ))}
@@ -234,12 +241,6 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric = 'price
         color: 'white',
         fillOpacity: 0.7
     });
-
-    const formatValue = (value: number, type: 'price' | 'price_per_sqm' | 'count') => {
-        if (type === 'price') return `€${(value/1000).toFixed(0)}k`;
-        if (type === 'price_per_sqm') return `€${value.toFixed(0)}/m²`;
-        return `${value} properties`;
-    };
 
     const onEachFeature = (feature: any, layer: any) => {
         const district = feature.properties.district;
