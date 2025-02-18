@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { Property, PropertyStats, AreaStats, DateRange } from '../types/property';
 
-const API_BASE_URL = 'http://localhost:5250/api';
+// Get the API URL from environment variables, fallback to localhost if not set
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5250/api';
 
 // Create axios instance with default config
 const axiosInstance = axios.create({
