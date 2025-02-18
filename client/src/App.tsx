@@ -113,7 +113,7 @@ function App() {
                     <AppBar position="static">
                         <Toolbar>
                             <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                                FundaMental - Amsterdam Property Analysis
+                                FundaMental - Property Analysis
                             </Typography>
                         </Toolbar>
                     </AppBar>
