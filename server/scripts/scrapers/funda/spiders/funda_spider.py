@@ -40,8 +40,8 @@ class FundaSpider(scrapy.Spider):
         
         # Initialize database connection for URL checking
         self.db = FundaDB()
-        self.existing_urls = self.db.get_existing_urls()  # Get existing URLs from DB
-        self.logger.info(f"Found {len(self.existing_urls)} existing URLs in database")
+        self.existing_urls = self.db.get_all_active_urls()  # Get existing active/inactive URLs from DB
+        self.logger.info(f"Found {len(self.existing_urls)} existing active/inactive URLs in database")
         
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')

@@ -68,14 +68,24 @@ class FundaDB:
             cursor = conn.cursor()
             
             try:
+                # First try to update if the property exists
                 cursor.execute('''
-                    INSERT OR IGNORE INTO properties 
-                    (url, street, neighborhood, property_type, city, postal_code, price, year_built, 
-                     living_area, num_rooms, status, listing_date, 
-                     selling_date, scraped_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    UPDATE properties 
+                    SET street = ?, 
+                        neighborhood = ?,
+                        property_type = ?,
+                        city = ?,
+                        postal_code = ?,
+                        price = ?,
+                        year_built = ?,
+                        living_area = ?,
+                        num_rooms = ?,
+                        status = ?,
+                        listing_date = ?,
+                        selling_date = ?,
+                        scraped_at = ?
+                    WHERE url = ?
                 ''', (
-                    item.get('url'),
                     item.get('street'),
                     item.get('neighborhood'),
                     item.get('property_type'),
@@ -88,17 +98,58 @@ class FundaDB:
                     item.get('status'),
                     item.get('listing_date'),
                     item.get('selling_date'),
-                    item.get('scraped_at')
+                    item.get('scraped_at'),
+                    item.get('url')
                 ))
+                
+                # If no row was updated, insert a new one
+                if cursor.rowcount == 0:
+                    cursor.execute('''
+                        INSERT INTO properties 
+                        (url, street, neighborhood, property_type, city, postal_code, 
+                         price, year_built, living_area, num_rooms, status, 
+                         listing_date, selling_date, scraped_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        item.get('url'),
+                        item.get('street'),
+                        item.get('neighborhood'),
+                        item.get('property_type'),
+                        item.get('city'),
+                        item.get('postal_code'),
+                        item.get('price'),
+                        item.get('year_built'),
+                        item.get('living_area'),
+                        item.get('num_rooms'),
+                        item.get('status'),
+                        item.get('listing_date'),
+                        item.get('selling_date'),
+                        item.get('scraped_at')
+                    ))
+                
                 conn.commit()
                 return True
             except sqlite3.Error as e:
-                print(f"Error inserting property: {e}")
+                print(f"Error inserting/updating property: {e}")
                 return False
 
     def get_existing_urls(self):
-        """Get all existing URLs from the database."""
+        """
+        DEPRECATED: Use get_sold_urls() or get_all_active_urls() instead.
+        This method is kept for backward compatibility.
+        """
+        return self.get_sold_urls()
+
+    def get_sold_urls(self):
+        """Get URLs of properties that are already marked as sold."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT url FROM properties WHERE status IS NOT NULL')  # Only get URLs of properties that still exist
-            return {row[0] for row in cursor.fetchall()}  # Return as a set for O(1) lookups 
+            cursor.execute('SELECT url FROM properties WHERE status = "sold"')
+            return {row[0] for row in cursor.fetchall()}
+
+    def get_all_active_urls(self):
+        """Get URLs of all properties that are either active or inactive (not sold)."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT url FROM properties WHERE status IN ("active", "inactive")')
+            return {row[0] for row in cursor.fetchall()} 
