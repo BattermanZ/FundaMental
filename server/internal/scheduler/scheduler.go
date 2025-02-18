@@ -9,6 +9,29 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// JobType represents different types of spider jobs
+type JobType int
+
+const (
+	JobTypeActive JobType = iota
+	JobTypeSold
+	JobTypeRefresh
+)
+
+// String returns the string representation of a JobType
+func (j JobType) String() string {
+	switch j {
+	case JobTypeActive:
+		return "active"
+	case JobTypeSold:
+		return "sold"
+	case JobTypeRefresh:
+		return "refresh"
+	default:
+		return "unknown"
+	}
+}
+
 // Scheduler manages periodic execution of spiders
 type Scheduler struct {
 	spiderManager *scraping.SpiderManager
@@ -16,6 +39,8 @@ type Scheduler struct {
 	stopChan      chan struct{}
 	wg            sync.WaitGroup
 	cities        []string
+	jobMutex      sync.Mutex // Ensures sequential job execution
+	isStartupRun  bool       // Tracks whether we're in startup run
 }
 
 // NewScheduler creates a new scheduler
@@ -32,92 +57,130 @@ func NewScheduler(spiderManager *scraping.SpiderManager, logger *logrus.Logger, 
 		logger:        logger,
 		stopChan:      make(chan struct{}),
 		cities:        cities,
+		isStartupRun:  true, // Initialize as true for startup
 	}
 }
 
 // Start begins the scheduled tasks
 func (s *Scheduler) Start() {
-	s.wg.Add(3) // One for active spider, one for sold spider, one for refresh spider
-
-	// Start active spider scheduler (every hour)
-	go func() {
-		defer s.wg.Done()
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-s.stopChan:
-				return
-			case <-ticker.C:
-				s.runActiveSpiders()
-			}
-		}
-	}()
-
-	// Start sold spider scheduler (every day at 00:00)
-	go func() {
-		defer s.wg.Done()
-		for {
-			select {
-			case <-s.stopChan:
-				return
-			default:
-				now := time.Now()
-				nextRun := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
-				timer := time.NewTimer(nextRun.Sub(now))
-
-				select {
-				case <-s.stopChan:
-					timer.Stop()
-					return
-				case <-timer.C:
-					s.runSoldSpiders()
-				}
-			}
-		}
-	}()
-
-	// Start refresh spider scheduler
-	go func() {
-		defer s.wg.Done()
-		s.scheduleRefreshSpiders()
-	}()
-
-	// Run immediately on start
-	s.runActiveSpiders()
-	s.runSoldSpiders()
+	s.wg.Add(1)
+	go s.runScheduler()
 }
 
-// Stop gracefully stops the scheduler
-func (s *Scheduler) Stop() {
-	close(s.stopChan)
-	s.wg.Wait()
+// runScheduler handles all scheduled tasks
+func (s *Scheduler) runScheduler() {
+	defer s.wg.Done()
+
+	// Run startup jobs in a separate goroutine
+	go func() {
+		s.jobMutex.Lock()
+		defer s.jobMutex.Unlock()
+		s.logger.Info("Running startup spider jobs")
+		s.runActiveSpiders()
+		s.isStartupRun = false // Mark startup as complete
+		s.logger.Info("Startup spider jobs completed")
+	}()
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case t := <-ticker.C:
+			s.executeScheduledJobs(t)
+		}
+	}
 }
 
-// runActiveSpiders runs the active spider for all configured cities
+// executeScheduledJobs runs all jobs that are scheduled for the given time
+func (s *Scheduler) executeScheduledJobs(t time.Time) {
+	// Skip if we're still running startup jobs
+	if s.isStartupRun {
+		s.logger.Debug("Skipping scheduled jobs while startup is in progress")
+		return
+	}
+
+	s.jobMutex.Lock()
+	defer s.jobMutex.Unlock()
+
+	s.logger.WithFields(logrus.Fields{
+		"hour":   t.Hour(),
+		"minute": t.Minute(),
+	}).Debug("Checking scheduled jobs")
+
+	// Check if it's time for the sold spider (midnight)
+	if t.Hour() == 0 && t.Minute() == 0 {
+		s.logger.Info("Starting scheduled sold spider jobs")
+		s.runSoldSpiders()
+		s.logger.Info("Completed scheduled sold spider jobs")
+	}
+
+	// Check if it's time for the active spider (every hour)
+	if t.Minute() == 0 {
+		s.logger.Info("Starting scheduled active spider jobs")
+		s.runActiveSpiders()
+		s.logger.Info("Completed scheduled active spider jobs")
+	}
+
+	// Check refresh schedule
+	s.checkAndRunRefreshSpiders(t)
+}
+
+// runActiveSpiders runs the active spider for all configured cities sequentially
 func (s *Scheduler) runActiveSpiders() {
-	s.logger.Info("Starting scheduled active spider run")
+	s.logger.Info("Starting active spider run")
 	for _, city := range s.cities {
+		s.logger.WithFields(logrus.Fields{
+			"city":     city,
+			"job_type": JobTypeActive.String(),
+		}).Info("Starting spider job")
+
 		if err := s.spiderManager.RunActiveSpider(city, nil); err != nil {
-			s.logger.WithError(err).WithField("city", city).Error("Failed to run active spider")
+			s.logger.WithError(err).WithFields(logrus.Fields{
+				"city":     city,
+				"job_type": JobTypeActive.String(),
+			}).Error("Spider job failed")
+		} else {
+			s.logger.WithFields(logrus.Fields{
+				"city":     city,
+				"job_type": JobTypeActive.String(),
+			}).Info("Spider job completed successfully")
 		}
 	}
 }
 
-// runSoldSpiders runs the sold spider for all configured cities
+// runSoldSpiders runs the sold spider for all configured cities sequentially
 func (s *Scheduler) runSoldSpiders() {
-	s.logger.Info("Starting scheduled sold spider run")
+	s.logger.Info("Starting sold spider run")
 	for _, city := range s.cities {
+		s.logger.WithFields(logrus.Fields{
+			"city":     city,
+			"job_type": JobTypeSold.String(),
+		}).Info("Starting spider job")
+
 		if err := s.spiderManager.RunSoldSpider(city, nil, true); err != nil {
-			s.logger.WithError(err).WithField("city", city).Error("Failed to run sold spider")
+			s.logger.WithError(err).WithFields(logrus.Fields{
+				"city":     city,
+				"job_type": JobTypeSold.String(),
+			}).Error("Spider job failed")
+		} else {
+			s.logger.WithFields(logrus.Fields{
+				"city":     city,
+				"job_type": JobTypeSold.String(),
+			}).Info("Spider job completed successfully")
 		}
 	}
 }
 
-// scheduleRefreshSpiders schedules refresh operations for each city
-func (s *Scheduler) scheduleRefreshSpiders() {
-	timeSlots := []int{0, 4, 8, 12, 16, 20} // Hours of the day for scheduling
+// checkAndRunRefreshSpiders checks and runs refresh spiders for the current time
+func (s *Scheduler) checkAndRunRefreshSpiders(t time.Time) {
+	if t.Minute() != 0 { // Only check on the hour
+		return
+	}
+
+	timeSlots := []int{0, 4, 8, 12, 16, 20}
 	daysOfWeek := []time.Weekday{
 		time.Sunday,
 		time.Monday,
@@ -128,7 +191,7 @@ func (s *Scheduler) scheduleRefreshSpiders() {
 		time.Saturday,
 	}
 
-	// Create a schedule that prioritizes earlier time slots
+	// Create schedule slots
 	type scheduleSlot struct {
 		day  time.Weekday
 		hour int
@@ -158,31 +221,33 @@ func (s *Scheduler) scheduleRefreshSpiders() {
 		}
 	}
 
-	// Run the scheduler
-	for {
-		select {
-		case <-s.stopChan:
-			return
-		default:
-			now := time.Now()
+	// Check each city's schedule
+	for city, slot := range citySchedule {
+		if t.Weekday() == slot.day && t.Hour() == slot.hour {
+			s.logger.WithFields(logrus.Fields{
+				"city":     city,
+				"job_type": JobTypeRefresh.String(),
+				"day":      slot.day,
+				"hour":     slot.hour,
+			}).Info("Starting spider job")
 
-			// Check each city's schedule
-			for city, slot := range citySchedule {
-				if now.Weekday() == slot.day && now.Hour() == slot.hour && now.Minute() == 0 {
-					s.logger.WithFields(logrus.Fields{
-						"city": city,
-						"day":  slot.day,
-						"hour": slot.hour,
-					}).Info("Running scheduled refresh spider")
-
-					if err := s.spiderManager.RunRefreshSpider(city); err != nil {
-						s.logger.WithError(err).WithField("city", city).Error("Failed to run refresh spider")
-					}
-				}
+			if err := s.spiderManager.RunRefreshSpider(city); err != nil {
+				s.logger.WithError(err).WithFields(logrus.Fields{
+					"city":     city,
+					"job_type": JobTypeRefresh.String(),
+				}).Error("Spider job failed")
+			} else {
+				s.logger.WithFields(logrus.Fields{
+					"city":     city,
+					"job_type": JobTypeRefresh.String(),
+				}).Info("Spider job completed successfully")
 			}
-
-			// Sleep for a minute before checking again
-			time.Sleep(time.Minute)
 		}
 	}
+}
+
+// Stop gracefully stops the scheduler
+func (s *Scheduler) Stop() {
+	close(s.stopChan)
+	s.wg.Wait()
 }
