@@ -100,8 +100,8 @@ export const api = {
         return response.data;
     },
 
-    testTelegramConfig: async (config: { bot_token: string; chat_id: string; is_enabled: boolean }) => {
-        const response = await axiosInstance.post('/telegram/config/test', config);
+    testTelegramConfig: async () => {
+        const response = await axiosInstance.post('/telegram/config/test');
         return response.data;
     }
 }; 

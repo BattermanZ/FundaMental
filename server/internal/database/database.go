@@ -893,3 +893,39 @@ func (d *Database) UpdateTelegramConfig(config *models.TelegramConfigRequest) er
 	}
 	return nil
 }
+
+// GetDistrictMedianPricePerSqm returns the median price per square meter for a district (4-digit postal code)
+func (d *Database) GetDistrictMedianPricePerSqm(district string) (float64, error) {
+	query := `
+		WITH prices_per_sqm AS (
+			SELECT 
+				CAST(price AS FLOAT) / CAST(living_area AS FLOAT) as price_per_sqm
+			FROM properties 
+			WHERE substr(postal_code, 1, 4) = ?
+				AND price > 0 
+				AND living_area > 0
+				AND selling_date IS NOT NULL
+				AND selling_date >= date('now', '-1 year')
+		)
+		SELECT 
+			AVG(price_per_sqm) as median_price
+		FROM (
+			SELECT price_per_sqm
+			FROM prices_per_sqm
+			ORDER BY price_per_sqm
+			LIMIT 2 - (SELECT COUNT(*) FROM prices_per_sqm) % 2
+			OFFSET (SELECT (COUNT(*) - 1) / 2 FROM prices_per_sqm)
+		);
+	`
+
+	var medianPrice *float64
+	err := d.db.QueryRow(query, district).Scan(&medianPrice)
+	if err == sql.ErrNoRows || medianPrice == nil {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to get median price per sqm: %v", err)
+	}
+
+	return *medianPrice, nil
+}

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
 	"fundamental/server/internal/geometry"
@@ -12,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -54,6 +54,7 @@ func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 
 	// Initialize the telegram service
 	telegramService := telegram.NewService(logger)
+	telegramService.SetDatabase(db)
 
 	// Load existing Telegram configuration
 	if config, err := db.GetTelegramConfig(); err == nil && config != nil {
@@ -245,6 +246,19 @@ func (h *Handler) UpdateTelegramConfig(c *gin.Context) {
 		return
 	}
 
+	// Basic validation
+	if len(request.BotToken) < 20 || !strings.Contains(request.BotToken, ":") {
+		h.logger.Error("Invalid bot token format")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid bot token format. Please check your bot token from @BotFather"})
+		return
+	}
+
+	if request.ChatID == "" {
+		h.logger.Error("Chat ID is required")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Chat ID is required"})
+		return
+	}
+
 	// Test the Telegram configuration before saving
 	testService := telegram.NewService(h.logger)
 	testConfig := &models.TelegramConfig{
@@ -257,14 +271,14 @@ func (h *Handler) UpdateTelegramConfig(c *gin.Context) {
 	testMessage := "🔔 Test notification from FundaMental\n\nIf you see this message, your Telegram configuration is working correctly!"
 	if err := testService.SendMessage(testMessage); err != nil {
 		h.logger.WithError(err).Error("Failed to send test message")
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to send test message: %v", err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Save the configuration
 	if err := h.db.UpdateTelegramConfig(&request); err != nil {
 		h.logger.WithError(err).Error("Failed to update Telegram config")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update Telegram config"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save configuration to database"})
 		return
 	}
 
@@ -278,27 +292,29 @@ func (h *Handler) UpdateTelegramConfig(c *gin.Context) {
 
 // TestTelegramConfig tests the Telegram configuration by sending a sample property notification
 func (h *Handler) TestTelegramConfig(c *gin.Context) {
-	var request models.TelegramConfigRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		h.logger.WithError(err).Error("Invalid request body")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+	// Get the current configuration from the database
+	config, err := h.db.GetTelegramConfig()
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to get Telegram config")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get Telegram configuration"})
 		return
 	}
 
-	// Create a test service with the provided configuration
-	testService := telegram.NewService(h.logger)
-	testConfig := &models.TelegramConfig{
-		BotToken:  request.BotToken,
-		ChatID:    request.ChatID,
-		IsEnabled: true,
+	if config == nil || !config.IsEnabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Telegram is not configured or is disabled"})
+		return
 	}
-	testService.UpdateConfig(testConfig)
+
+	// Create a test service with the stored configuration
+	testService := telegram.NewService(h.logger)
+	testService.UpdateConfig(config)
+	testService.SetDatabase(h.db)
 
 	// Create a sample property for testing
 	sampleProperty := map[string]interface{}{
 		"street":      "Test Street 123",
 		"city":        "Amsterdam",
-		"postal_code": "1234 AB",
+		"postal_code": "1012 AB", // Real Amsterdam postal code for better test
 		"price":       450000,
 		"year_built":  2020,
 		"living_area": 85,
@@ -309,7 +325,7 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 	// Send test notification
 	if err := testService.NotifyNewProperty(sampleProperty); err != nil {
 		h.logger.WithError(err).Error("Failed to send test notification")
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to send test notification: %v", err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 

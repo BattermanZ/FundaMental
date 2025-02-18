@@ -26,6 +26,8 @@ const TelegramConfig: React.FC = () => {
         chat_id: '',
         is_enabled: false,
     });
+    const [originalToken, setOriginalToken] = useState<string>('');
+    const [hasTokenChanged, setHasTokenChanged] = useState(false);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState(false);
@@ -37,6 +39,7 @@ const TelegramConfig: React.FC = () => {
             try {
                 const data = await api.getTelegramConfig();
                 setConfig(data);
+                setOriginalToken(data.bot_token);
                 setLoading(false);
             } catch (err) {
                 setError('Failed to load Telegram configuration');
@@ -53,8 +56,19 @@ const TelegramConfig: React.FC = () => {
         setSuccess(null);
 
         try {
-            await api.updateTelegramConfig(config);
+            // Only send the bot token if it has been changed
+            const updateData = {
+                ...config,
+                bot_token: hasTokenChanged ? config.bot_token : originalToken
+            };
+            await api.updateTelegramConfig(updateData);
             setSuccess('Telegram configuration updated successfully');
+            
+            // After successful update, refresh the config
+            const newData = await api.getTelegramConfig();
+            setConfig(newData);
+            setOriginalToken(newData.bot_token);
+            setHasTokenChanged(false);
         } catch (err: any) {
             setError(err.response?.data?.error || 'Failed to update Telegram configuration');
         } finally {
@@ -68,11 +82,7 @@ const TelegramConfig: React.FC = () => {
         setSuccess(null);
 
         try {
-            await api.testTelegramConfig({
-                bot_token: config.bot_token,
-                chat_id: config.chat_id,
-                is_enabled: true
-            });
+            await api.testTelegramConfig();
             setSuccess('Test notification sent successfully! Check your Telegram.');
         } catch (err: any) {
             setError(err.response?.data?.error || 'Failed to send test notification');
@@ -81,11 +91,17 @@ const TelegramConfig: React.FC = () => {
         }
     };
 
+    const handleTokenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newToken = e.target.value;
+        setConfig({ ...config, bot_token: newToken });
+        setHasTokenChanged(true);
+    };
+
     if (loading) {
         return <CircularProgress />;
     }
 
-    const isConfigured = config.bot_token && config.chat_id;
+    const isConfigured = Boolean(originalToken || (hasTokenChanged && config.bot_token)) && config.chat_id;
 
     return (
         <Paper sx={{ p: 3 }}>
@@ -122,10 +138,11 @@ const TelegramConfig: React.FC = () => {
                     fullWidth
                     label="Bot Token"
                     value={config.bot_token}
-                    onChange={(e) => setConfig({ ...config, bot_token: e.target.value })}
+                    onChange={handleTokenChange}
                     margin="normal"
                     required
                     type="password"
+                    placeholder={hasTokenChanged ? '' : 'Enter new token or leave unchanged'}
                 />
 
                 <TextField
