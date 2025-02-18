@@ -29,7 +29,7 @@ func NewDatabase(dbPath string) (*Database, error) {
 	return &Database{db: db}, nil
 }
 
-func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Property, error) {
+func (d *Database) GetAllProperties(startDate, endDate string, city string) ([]models.Property, error) {
 	query := `
         SELECT 
             id, 
@@ -66,6 +66,7 @@ func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Propert
                 ? = '' OR selling_date <= ?
             ))
         )
+        AND (? = '' OR LOWER(city) = LOWER(?))
     `
 	var args []interface{}
 	args = append(args,
@@ -73,6 +74,7 @@ func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Propert
 		endDate, endDate, // For active properties listing_date <= ?
 		startDate, startDate, // For sold properties selling_date >= ?
 		endDate, endDate, // For sold properties selling_date <= ?
+		city, city, // For city filter
 	)
 
 	rows, err := d.db.Query(query, args...)
@@ -188,7 +190,7 @@ func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Propert
 	return properties, nil
 }
 
-func (d *Database) GetPropertyStats(startDate, endDate string) (models.PropertyStats, error) {
+func (d *Database) GetPropertyStats(startDate, endDate string, city string) (models.PropertyStats, error) {
 	query := `
         WITH price_data AS (
             SELECT 
@@ -203,6 +205,7 @@ func (d *Database) GetPropertyStats(startDate, endDate string) (models.PropertyS
                 END as days_to_sell
             FROM properties
             WHERE price IS NOT NULL
+            AND (? = '' OR LOWER(city) = LOWER(?))
             AND (
                 -- For active properties, check effective_date (listing_date or scraped_at)
                 (status = 'active' AND (
@@ -254,7 +257,13 @@ func (d *Database) GetPropertyStats(startDate, endDate string) (models.PropertyS
         FROM active_stats, sold_stats
     `
 	var args []interface{}
-	args = append(args, startDate, startDate, endDate, endDate, startDate, startDate, endDate, endDate)
+	args = append(args,
+		city, city, // For city filter
+		startDate, startDate, // For active properties listing_date >= ?
+		endDate, endDate, // For active properties listing_date <= ?
+		startDate, startDate, // For sold properties selling_date >= ?
+		endDate, endDate, // For sold properties selling_date <= ?
+	)
 
 	var stats models.PropertyStats
 	err := d.db.QueryRow(query, args...).Scan(
@@ -268,7 +277,7 @@ func (d *Database) GetPropertyStats(startDate, endDate string) (models.PropertyS
 	return stats, err
 }
 
-func (d *Database) GetAreaStats(postalPrefix string, startDate, endDate string) (models.AreaStats, error) {
+func (d *Database) GetAreaStats(postalPrefix string, startDate, endDate string, city string) (models.AreaStats, error) {
 	query := `
         SELECT 
             postal_code,
@@ -277,6 +286,7 @@ func (d *Database) GetAreaStats(postalPrefix string, startDate, endDate string) 
             AVG(CAST(price AS FLOAT) / NULLIF(living_area, 0)) as avg_price_per_sqm
         FROM properties
         WHERE postal_code LIKE ? || '%'
+        AND (? = '' OR LOWER(city) = LOWER(?))
         AND (
             -- For active properties, check effective_date (listing_date or scraped_at)
             (status = 'active' AND (
@@ -295,8 +305,9 @@ func (d *Database) GetAreaStats(postalPrefix string, startDate, endDate string) 
         GROUP BY substr(postal_code, 1, 4)
     `
 	var args []interface{}
-	args = append(args, postalPrefix)
 	args = append(args,
+		postalPrefix,
+		city, city, // For city filter
 		startDate, startDate, // For active properties listing_date >= ?
 		endDate, endDate, // For active properties listing_date <= ?
 		startDate, startDate, // For sold properties selling_date >= ?
@@ -313,15 +324,17 @@ func (d *Database) GetAreaStats(postalPrefix string, startDate, endDate string) 
 	return stats, err
 }
 
-func (d *Database) GetRecentSales(limit int, startDate, endDate string) ([]models.Property, error) {
+func (d *Database) GetRecentSales(limit int, startDate, endDate string, city string) ([]models.Property, error) {
 	query := `
         SELECT id, url, street, neighborhood, property_type, city, postal_code,
                price, year_built, living_area, num_rooms, status, 
                listing_date, selling_date, scraped_at, created_at
         FROM properties
         WHERE status = 'sold'
+        AND (? = '' OR LOWER(city) = LOWER(?))
     `
 	var args []interface{}
+	args = append(args, city, city)
 
 	if startDate != "" {
 		query += " AND selling_date >= ?"

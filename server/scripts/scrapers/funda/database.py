@@ -57,6 +57,9 @@ class FundaDB:
             # Create index on coordinates for spatial queries
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_coordinates ON properties(latitude, longitude)')
             
+            # Create index on city for city-based filtering
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_city ON properties(city)')
+            
             conn.commit()
 
     def insert_property(self, item):

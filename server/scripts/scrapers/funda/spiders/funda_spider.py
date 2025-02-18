@@ -270,14 +270,14 @@ class FundaSpider(scrapy.Spider):
         if json_ld and 'address' in json_ld:
             address_data = json_ld['address']
             item.neighborhood = address_data.get('addressLocality', '').split(',')[0].strip()
-            item.city = 'Amsterdam'
+            item.city = self.place.capitalize()
             item.postal_code = address_data.get('postalCode', '')
         else:
             # Fallback to breadcrumb
             breadcrumb_items = response.css('nav[aria-label="Breadcrumb"] span::text').getall()
             if breadcrumb_items:
                 item.neighborhood = breadcrumb_items[-1].strip()
-                item.city = 'Amsterdam'
+                item.city = self.place.capitalize()
                 # Try to extract postal code from title
                 title = response.css('title::text').get()
                 if title:
