@@ -59,8 +59,8 @@ func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Propert
                 ? = '' OR COALESCE(listing_date, scraped_at) <= ?
             ))
             OR
-            -- For sold properties, check selling_date
-            (status = 'sold' AND (
+            -- For sold properties, check selling_date only if it exists
+            (status = 'sold' AND selling_date IS NOT NULL AND (
                 ? = '' OR selling_date >= ?
             ) AND (
                 ? = '' OR selling_date <= ?
@@ -211,8 +211,8 @@ func (d *Database) GetPropertyStats(startDate, endDate string) (models.PropertyS
                     ? = '' OR COALESCE(listing_date, scraped_at) <= ?
                 ))
                 OR
-                -- For sold properties, check selling_date
-                (status = 'sold' AND (
+                -- For sold properties, check selling_date only if it exists
+                (status = 'sold' AND selling_date IS NOT NULL AND (
                     ? = '' OR selling_date >= ?
                 ) AND (
                     ? = '' OR selling_date <= ?
@@ -277,20 +277,31 @@ func (d *Database) GetAreaStats(postalPrefix string, startDate, endDate string) 
             AVG(CAST(price AS FLOAT) / NULLIF(living_area, 0)) as avg_price_per_sqm
         FROM properties
         WHERE postal_code LIKE ? || '%'
+        AND (
+            -- For active properties, check effective_date (listing_date or scraped_at)
+            (status = 'active' AND (
+                ? = '' OR COALESCE(listing_date, scraped_at) >= ?
+            ) AND (
+                ? = '' OR COALESCE(listing_date, scraped_at) <= ?
+            ))
+            OR
+            -- For sold properties, check selling_date only if it exists
+            (status = 'sold' AND selling_date IS NOT NULL AND (
+                ? = '' OR selling_date >= ?
+            ) AND (
+                ? = '' OR selling_date <= ?
+            ))
+        )
+        GROUP BY substr(postal_code, 1, 4)
     `
 	var args []interface{}
 	args = append(args, postalPrefix)
-
-	if startDate != "" {
-		query += " AND (listing_date >= ? OR selling_date >= ?)"
-		args = append(args, startDate, startDate)
-	}
-	if endDate != "" {
-		query += " AND (listing_date <= ? OR selling_date <= ?)"
-		args = append(args, endDate, endDate)
-	}
-
-	query += " GROUP BY substr(postal_code, 1, 4)"
+	args = append(args,
+		startDate, startDate, // For active properties listing_date >= ?
+		endDate, endDate, // For active properties listing_date <= ?
+		startDate, startDate, // For sold properties selling_date >= ?
+		endDate, endDate, // For sold properties selling_date <= ?
+	)
 
 	var stats models.AreaStats
 	err := d.db.QueryRow(query, args...).Scan(
