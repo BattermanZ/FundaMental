@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, GeoJSON, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Property } from '../types/property';
@@ -140,6 +140,52 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric = 'price
     const [valueRange, setValueRange] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
     const [densityData, setDensityData] = useState<Map<string, number>>(new Map());
     const [densityRange, setDensityRange] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
+    const geoJsonLayerRef = useRef<any>(null);
+
+    // Add a function to get tooltip content
+    const getTooltipContent = useCallback((district: string) => {
+        const data = districtData.get(district);
+        const count = densityData.get(district) || 0;
+
+        if (currentView === 'density') {
+            return `
+                <strong>District: ${district}</strong><br/>
+                Number of properties: ${count}
+            `;
+        } else if (data) {
+            const lowDataWarning = data.count < 3 ? '<br/><em>(Limited data available)</em>' : '';
+            const valueType = currentView === 'price' ? 'price' : 'price_per_sqm';
+            const avgValue = currentView === 'price' ? data.avg_price : data.avg_price_per_sqm;
+            const medianValue = currentView === 'price' ? data.median_price : data.median_price_per_sqm;
+
+            return `
+                <strong>District: ${district}</strong><br/>
+                Average ${currentView === 'price' ? 'Price' : 'Price/m²'}: 
+                ${formatValue(avgValue, valueType)}<br/>
+                Median ${currentView === 'price' ? 'Price' : 'Price/m²'}: 
+                ${formatValue(medianValue, valueType)}<br/>
+                Number of properties: ${data.count}${lowDataWarning}
+            `;
+        }
+        return '';
+    }, [currentView, districtData, densityData]);
+
+    // Add effect to update tooltips when view changes
+    useEffect(() => {
+        if (geoJsonLayerRef.current) {
+            const layer = geoJsonLayerRef.current;
+            layer.eachLayer((sublayer: any) => {
+                const district = sublayer.feature.properties.district;
+                sublayer.unbindTooltip();
+                sublayer.bindTooltip(getTooltipContent(district));
+            });
+        }
+    }, [currentView, getTooltipContent]);
+
+    const onEachFeature = useCallback((feature: any, layer: any) => {
+        const district = feature.properties.district;
+        layer.bindTooltip(getTooltipContent(district));
+    }, [getTooltipContent]);
 
     useEffect(() => {
         fetch('/district_hulls.geojson')
@@ -190,12 +236,16 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric = 'price
     }, [properties]);
 
     useEffect(() => {
-        // Update value range based on current view
+        // Update value range based on current view, excluding districts with too few properties
         if (districtData.size > 0) {
-            const values = Array.from(districtData.values()).map(d => 
-                currentView === 'price' ? d.avg_price : 
-                currentView === 'price_per_sqm' ? d.avg_price_per_sqm : 0
-            );
+            const MIN_PROPERTIES = 3; // Minimum number of properties for a district to be included in range calculation
+            
+            const values = Array.from(districtData.values())
+                .filter(d => d.count >= MIN_PROPERTIES) // Only consider districts with enough properties
+                .map(d => currentView === 'price' ? d.avg_price : 
+                    currentView === 'price_per_sqm' ? d.avg_price_per_sqm : 0
+                );
+            
             setValueRange({
                 min: d3.min(values) || 0,
                 max: d3.max(values) || 0
@@ -230,7 +280,9 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric = 'price
                 .domain([valueRange.min, valueRange.max])
                 .interpolator((t) => d3.interpolateRdYlGn(1 - t));
 
-            return colorScale(value);
+            // Clamp the value between min and max
+            const clampedValue = Math.max(valueRange.min, Math.min(valueRange.max, value));
+            return colorScale(clampedValue);
         }
     };
 
@@ -241,28 +293,6 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric = 'price
         color: 'white',
         fillOpacity: 0.7
     });
-
-    const onEachFeature = (feature: any, layer: any) => {
-        const district = feature.properties.district;
-        const data = districtData.get(district);
-        const count = densityData.get(district) || 0;
-
-        if (currentView === 'density') {
-            layer.bindTooltip(`
-                <strong>District: ${district}</strong><br/>
-                Number of properties: ${count}
-            `);
-        } else if (data) {
-            layer.bindTooltip(`
-                <strong>District: ${district}</strong><br/>
-                Average ${currentView === 'price' ? 'Price' : 'Price/m²'}: 
-                ${formatValue(currentView === 'price' ? data.avg_price : data.avg_price_per_sqm, currentView)}<br/>
-                Median ${currentView === 'price' ? 'Price' : 'Price/m²'}: 
-                ${formatValue(currentView === 'price' ? data.median_price : data.median_price_per_sqm, currentView)}<br/>
-                Number of properties: ${data.count}
-            `);
-        }
-    };
 
     const getViewTitle = () => {
         switch (currentView) {
@@ -313,6 +343,7 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric = 'price
                         data={geoJsonData}
                         style={style}
                         onEachFeature={onEachFeature}
+                        ref={geoJsonLayerRef}
                     />
                 </MapContainer>
                 {currentView === 'density' ? (
