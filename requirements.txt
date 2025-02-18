@@ -1,4 +1,0 @@
-numpy>=1.21.0
-scipy>=1.7.0
-shapely>=2.0.0
-requests>=2.26.0 
