@@ -97,5 +97,5 @@ class FundaDB:
         """Get all existing URLs from the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT url FROM properties')
+            cursor.execute('SELECT url FROM properties WHERE status IS NOT NULL')  # Only get URLs of properties that still exist
             return {row[0] for row in cursor.fetchall()}  # Return as a set for O(1) lookups 
