@@ -35,7 +35,7 @@ const MetropolitanAreaSelector: React.FC<MetropolitanAreaSelectorProps> = ({ val
     };
 
     return (
-        <FormControl fullWidth>
+        <FormControl fullWidth size="small" sx={{ bgcolor: 'white', borderRadius: 1 }}>
             <InputLabel id="metro-area-select-label">Metropolitan Area</InputLabel>
             <Select
                 labelId="metro-area-select-label"

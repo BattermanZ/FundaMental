@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, createContext, useContext } from 'react';
 import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab, Paper, Stack } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
@@ -12,6 +12,22 @@ import PropertyCharts from './components/PropertyCharts';
 import MetropolitanAreaList from './components/MetropolitanAreaList';
 import MetropolitanAreaSelector from './components/MetropolitanAreaSelector';
 
+// Create Metropolitan Context
+interface MetropolitanContextType {
+    selectedMetroArea: number | null;
+    setSelectedMetroArea: (id: number | null) => void;
+}
+
+const MetropolitanContext = createContext<MetropolitanContextType | undefined>(undefined);
+
+export const useMetropolitanArea = () => {
+    const context = useContext(MetropolitanContext);
+    if (context === undefined) {
+        throw new Error('useMetropolitanArea must be used within a MetropolitanProvider');
+    }
+    return context;
+};
+
 const StyledContainer = styled(Container)(({ theme }) => ({
     marginTop: theme.spacing(4),
 }));
@@ -24,7 +40,7 @@ const StyledSection = styled(Box)(({ theme }) => ({
 const DashboardPage = () => {
     const [startDate, setStartDate] = useState<Dayjs | null>(dayjs().subtract(1, 'year'));
     const [endDate, setEndDate] = useState<Dayjs | null>(dayjs());
-    const [selectedMetroArea, setSelectedMetroArea] = useState<number | null>(null);
+    const { selectedMetroArea } = useMetropolitanArea();
 
     const dateRange = {
         startDate: startDate?.format('YYYY-MM-DD'),
@@ -36,32 +52,26 @@ const DashboardPage = () => {
             <StyledSection>
                 <Paper sx={{ p: 2, mb: 3 }}>
                     <Typography variant="h6" gutterBottom>
-                        Filters
+                        Date Range
                     </Typography>
-                    <Stack spacing={2}>
-                        <Stack direction="row" spacing={2}>
-                            <DatePicker
-                                label="Start Date"
-                                value={startDate}
-                                onChange={(newValue) => setStartDate(newValue)}
-                                maxDate={endDate || undefined}
-                                slotProps={{
-                                    textField: { fullWidth: true }
-                                }}
-                            />
-                            <DatePicker
-                                label="End Date"
-                                value={endDate}
-                                onChange={(newValue) => setEndDate(newValue)}
-                                minDate={startDate || undefined}
-                                slotProps={{
-                                    textField: { fullWidth: true }
-                                }}
-                            />
-                        </Stack>
-                        <MetropolitanAreaSelector
-                            value={selectedMetroArea}
-                            onChange={setSelectedMetroArea}
+                    <Stack direction="row" spacing={2}>
+                        <DatePicker
+                            label="Start Date"
+                            value={startDate}
+                            onChange={(newValue) => setStartDate(newValue)}
+                            maxDate={endDate || undefined}
+                            slotProps={{
+                                textField: { fullWidth: true }
+                            }}
+                        />
+                        <DatePicker
+                            label="End Date"
+                            value={endDate}
+                            onChange={(newValue) => setEndDate(newValue)}
+                            minDate={startDate || undefined}
+                            slotProps={{
+                                textField: { fullWidth: true }
+                            }}
                         />
                     </Stack>
                 </Paper>
@@ -85,18 +95,10 @@ const DashboardPage = () => {
 };
 
 const AnalyticsPage = () => {
-    const [selectedMetroArea, setSelectedMetroArea] = useState<number | null>(null);
+    const { selectedMetroArea } = useMetropolitanArea();
 
     return (
         <>
-            <StyledSection>
-                <Paper sx={{ p: 2, mb: 3 }}>
-                    <MetropolitanAreaSelector
-                        value={selectedMetroArea}
-                        onChange={setSelectedMetroArea}
-                    />
-                </Paper>
-            </StyledSection>
             <StyledSection>
                 <Typography variant="h4" gutterBottom>
                     Property Analysis
@@ -139,28 +141,38 @@ const Navigation = () => {
 };
 
 function App() {
+    const [selectedMetroArea, setSelectedMetroArea] = useState<number | null>(null);
+
     return (
         <Router>
             <LocalizationProvider dateAdapter={AdapterDayjs}>
-                <Box sx={{ flexGrow: 1 }}>
-                    <AppBar position="static">
-                        <Toolbar>
-                            <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                                FundaMental - Property Analysis
-                            </Typography>
-                        </Toolbar>
-                    </AppBar>
-                    
-                    <Navigation />
+                <MetropolitanContext.Provider value={{ selectedMetroArea, setSelectedMetroArea }}>
+                    <Box sx={{ flexGrow: 1 }}>
+                        <AppBar position="static">
+                            <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Typography variant="h6">
+                                    FundaMental - Property Analysis
+                                </Typography>
+                                <Box sx={{ width: 300 }}>
+                                    <MetropolitanAreaSelector
+                                        value={selectedMetroArea}
+                                        onChange={setSelectedMetroArea}
+                                    />
+                                </Box>
+                            </Toolbar>
+                        </AppBar>
+                        
+                        <Navigation />
 
-                    <StyledContainer>
-                        <Routes>
-                            <Route path="/" element={<DashboardPage />} />
-                            <Route path="/analytics" element={<AnalyticsPage />} />
-                            <Route path="/config" element={<ConfigPage />} />
-                        </Routes>
-                    </StyledContainer>
-                </Box>
+                        <StyledContainer>
+                            <Routes>
+                                <Route path="/" element={<DashboardPage />} />
+                                <Route path="/analytics" element={<AnalyticsPage />} />
+                                <Route path="/config" element={<ConfigPage />} />
+                            </Routes>
+                        </StyledContainer>
+                    </Box>
+                </MetropolitanContext.Provider>
             </LocalizationProvider>
         </Router>
     );
