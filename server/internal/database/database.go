@@ -51,18 +51,29 @@ func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Propert
             latitude,
             longitude
         FROM properties
-        WHERE 1=1
+        WHERE (
+            -- For active properties, check effective_date (listing_date or scraped_at)
+            (status = 'active' AND (
+                ? = '' OR COALESCE(listing_date, scraped_at) >= ?
+            ) AND (
+                ? = '' OR COALESCE(listing_date, scraped_at) <= ?
+            ))
+            OR
+            -- For sold properties, check selling_date
+            (status = 'sold' AND (
+                ? = '' OR selling_date >= ?
+            ) AND (
+                ? = '' OR selling_date <= ?
+            ))
+        )
     `
 	var args []interface{}
-
-	if startDate != "" {
-		query += " AND (listing_date >= ? OR selling_date >= ?)"
-		args = append(args, startDate, startDate)
-	}
-	if endDate != "" {
-		query += " AND (listing_date <= ? OR selling_date <= ?)"
-		args = append(args, endDate, endDate)
-	}
+	args = append(args,
+		startDate, startDate, // For active properties listing_date >= ?
+		endDate, endDate, // For active properties listing_date <= ?
+		startDate, startDate, // For sold properties selling_date >= ?
+		endDate, endDate, // For sold properties selling_date <= ?
+	)
 
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
