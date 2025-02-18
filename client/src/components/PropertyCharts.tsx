@@ -38,7 +38,11 @@ interface FilterOptions {
     sizeRange: [number, number];
 }
 
-const PropertyCharts: React.FC = () => {
+interface PropertyChartsProps {
+    metropolitanAreaId?: number | null;
+}
+
+const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) => {
     const [properties, setProperties] = useState<Property[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -68,20 +72,16 @@ const PropertyCharts: React.FC = () => {
         const fetchData = async () => {
             try {
                 setLoading(true);
-                const defaultDateRange = {
+                const data = await api.getAllProperties({
                     startDate: undefined,
                     endDate: undefined
-                };
-                const data = await api.getAllProperties(defaultDateRange);
-                
-                // Filter out properties with price 0
-                const validData = data.filter(p => p.price > 0);
-                setProperties(validData);
+                }, metropolitanAreaId);
+                setProperties(data);
                 
                 // Calculate actual ranges from data
-                const prices = validData.map(p => p.price).filter(Boolean);
-                const sizes = validData.map(p => p.living_area).filter(Boolean);
-                const rooms = validData.map(p => p.num_rooms).filter(Boolean);
+                const prices = data.map(p => p.price).filter(Boolean);
+                const sizes = data.map(p => p.living_area).filter(Boolean);
+                const rooms = data.map(p => p.num_rooms).filter(Boolean);
                 
                 const newRanges = {
                     price: {
@@ -116,7 +116,7 @@ const PropertyCharts: React.FC = () => {
                 
                 setError(null);
             } catch (error) {
-                console.error('Failed to fetch properties:', error);
+                console.error('Failed to fetch data:', error);
                 setError('Failed to load property data');
             } finally {
                 setLoading(false);
@@ -124,7 +124,7 @@ const PropertyCharts: React.FC = () => {
         };
 
         fetchData();
-    }, []);
+    }, [metropolitanAreaId]);
 
     // Memoize filtered properties
     const filteredPropertiesMemo = useMemo(() => {

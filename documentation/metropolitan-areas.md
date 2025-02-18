@@ -1,7 +1,151 @@
 # Metropolitan Areas Implementation
 
 ## Overview
-This document outlines a simple, configuration-based approach for handling metropolitan areas in the property tracking system. The focus is on allowing users to define which cities belong to a metropolitan area (e.g., Amsterdam metropolitan area including Amstelveen and Diemen) through the frontend interface.
+This document outlines the implementation of metropolitan areas in the property tracking system. The system allows users to define and manage metropolitan areas (e.g., Amsterdam metropolitan area including Amstelveen and Diemen) through a user-friendly frontend interface.
+
+## Implementation Status
+
+### Completed
+1. ✅ Backend database schema and migrations
+2. ✅ REST API endpoints for CRUD operations
+3. ✅ Data model and type definitions
+4. ✅ Basic metropolitan area management
+
+### Next Phase: Frontend Implementation
+The frontend implementation will consist of the following components:
+
+1. **Metropolitan Area Management Page**
+   ```typescript
+   interface MetropolitanArea {
+       id: number;
+       name: string;
+       cities: string[];
+   }
+   ```
+
+   Components needed:
+   - MetropolitanAreaList: Display all metropolitan areas
+   - MetropolitanAreaForm: Create/edit metropolitan areas
+   - CitySelector: Multi-select component for choosing cities
+   - ConfirmationDialog: For delete operations
+
+2. **Integration with Property Analysis**
+   - Update property filters to include metropolitan area selection
+   - Extend statistics calculations to metropolitan areas
+   - Add metropolitan area overlay to the map visualization
+
+## Frontend Components Design
+
+### MetropolitanAreaList
+```typescript
+const MetropolitanAreaList: React.FC = () => {
+    const [areas, setAreas] = useState<MetropolitanArea[]>([]);
+    // Fetch and display metropolitan areas
+    // Include edit/delete actions
+};
+```
+
+### MetropolitanAreaForm
+```typescript
+interface MetropolitanAreaFormProps {
+    area?: MetropolitanArea;
+    onSubmit: (area: MetropolitanArea) => void;
+}
+
+const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = () => {
+    // Form for creating/editing metropolitan areas
+    // Include city selection
+};
+```
+
+### CitySelector
+```typescript
+interface CitySelectorProps {
+    selectedCities: string[];
+    onChange: (cities: string[]) => void;
+}
+
+const CitySelector: React.FC<CitySelectorProps> = () => {
+    // Multi-select component for cities
+    // Autocomplete support
+};
+```
+
+## API Integration
+
+### Metropolitan Area Service
+```typescript
+// services/metropolitan.ts
+export const metropolitanApi = {
+    getAll: () => axios.get<MetropolitanArea[]>('/api/metropolitan'),
+    getOne: (name: string) => axios.get<MetropolitanArea>(`/api/metropolitan/${name}`),
+    create: (area: MetropolitanArea) => axios.post('/api/metropolitan', area),
+    update: (name: string, area: MetropolitanArea) => 
+        axios.put(`/api/metropolitan/${name}`, area),
+    delete: (name: string) => axios.delete(`/api/metropolitan/${name}`)
+};
+```
+
+## User Interface Design
+
+1. **List View**
+   - Display metropolitan areas in a Material-UI table
+   - Show name and number of cities
+   - Actions: Edit, Delete
+   - "Create New" button
+
+2. **Form View**
+   - Name field (required)
+   - City selector (multi-select with autocomplete)
+   - Save/Cancel buttons
+   - Validation feedback
+
+3. **Integration Points**
+   - Add metropolitan area filter to property search
+   - Include metropolitan areas in statistics views
+   - Show metropolitan boundaries on map
+
+## Implementation Steps
+
+1. Create new route and page component
+2. Implement metropolitan area service
+3. Build form components
+4. Add list view with CRUD operations
+5. Integrate with existing property filters
+6. Add metropolitan area statistics
+7. Update map visualization
+
+## Testing Strategy
+
+1. **Unit Tests**
+   - Form validation
+   - Component rendering
+   - Service functions
+
+2. **Integration Tests**
+   - CRUD operations
+   - API integration
+   - Filter functionality
+
+3. **End-to-End Tests**
+   - Complete metropolitan area management workflow
+   - Integration with property search and statistics
+
+## Next Steps
+
+1. Create new frontend route `/metropolitan-areas`
+2. Implement basic CRUD components
+3. Add metropolitan area selection to filters
+4. Update property statistics to support metropolitan areas
+5. Add metropolitan area boundaries to map visualization
+
+## Notes
+
+- Use Material-UI components for consistency
+- Implement proper error handling and loading states
+- Add confirmation dialogs for destructive actions
+- Include proper form validation
+- Ensure responsive design for all components
 
 ## Core Concept
 Instead of using database schemas or complex data structures, we'll use a simple JSON configuration file where:

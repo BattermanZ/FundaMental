@@ -389,12 +389,6 @@ func (d *Database) RunMigrations() error {
 		return fmt.Errorf("failed to create metropolitan_areas table: %v", err)
 	}
 
-	// Drop existing metropolitan_cities table if it exists
-	_, err = d.db.Exec(`DROP TABLE IF EXISTS metropolitan_cities;`)
-	if err != nil {
-		return fmt.Errorf("failed to drop metropolitan_cities table: %v", err)
-	}
-
 	// Create metropolitan cities table without the foreign key constraint
 	_, err = d.db.Exec(`
 		CREATE TABLE IF NOT EXISTS metropolitan_cities (

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, CircleMarker, LayerGroup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
@@ -32,9 +32,10 @@ interface FilterOptions {
 
 interface PropertyMapProps {
     dateRange: DateRange;
+    metropolitanAreaId?: number | null;
 }
 
-const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange }) => {
+const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange, metropolitanAreaId }) => {
     const [properties, setProperties] = useState<Property[]>([]);
     const [filteredProperties, setFilteredProperties] = useState<Property[]>([]);
     const [loading, setLoading] = useState(true);
@@ -51,7 +52,7 @@ const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange }) => {
     const fetchProperties = useCallback(async () => {
         try {
             setLoading(true);
-            const data = await api.getAllProperties(dateRange);
+            const data = await api.getAllProperties(dateRange, metropolitanAreaId);
             const validProperties = data.filter(
                 (property) => property.latitude != null && 
                             property.longitude != null
@@ -66,7 +67,7 @@ const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange }) => {
         } finally {
             setLoading(false);
         }
-    }, [filters, dateRange]);
+    }, [filters, dateRange, metropolitanAreaId]);
 
     useEffect(() => {
         fetchProperties();
@@ -465,6 +466,17 @@ const PriceLayer: React.FC<{ properties: Property[] }> = ({ properties }) => {
             }
         };
     }, [map, properties]);
+
+    useEffect(() => {
+        if (voronoiLayer && map) {
+            map.addLayer(voronoiLayer);
+            return () => {
+                if (map && voronoiLayer) {
+                    map.removeLayer(voronoiLayer);
+                }
+            };
+        }
+    }, [map, voronoiLayer]);
 
     return priceRange ? <PriceLegend min={priceRange.min} max={priceRange.max} /> : null;
 };

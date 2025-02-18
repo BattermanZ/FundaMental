@@ -21,9 +21,10 @@ const ValueTypography = styled(Typography)(() => ({
 
 interface PropertyStatsProps {
     dateRange: DateRange;
+    metropolitanAreaId?: number | null;
 }
 
-const PropertyStats: React.FC<PropertyStatsProps> = ({ dateRange }) => {
+const PropertyStats: React.FC<PropertyStatsProps> = ({ dateRange, metropolitanAreaId }) => {
     const [stats, setStats] = useState<Stats | null>(null);
     const [loading, setLoading] = useState(true);
 
@@ -31,7 +32,7 @@ const PropertyStats: React.FC<PropertyStatsProps> = ({ dateRange }) => {
         const fetchStats = async () => {
             try {
                 setLoading(true);
-                const data = await api.getPropertyStats(dateRange);
+                const data = await api.getPropertyStats(dateRange, metropolitanAreaId);
                 setStats(data);
             } catch (error) {
                 console.error('Failed to fetch stats:', error);
@@ -41,7 +42,7 @@ const PropertyStats: React.FC<PropertyStatsProps> = ({ dateRange }) => {
         };
 
         fetchStats();
-    }, [dateRange]);
+    }, [dateRange, metropolitanAreaId]);
 
     if (loading) {
         return <div>Loading statistics...</div>;

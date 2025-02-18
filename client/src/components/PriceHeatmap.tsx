@@ -202,19 +202,17 @@ const PriceHeatmap: React.FC<PriceHeatmapProps> = ({ properties, metric = 'price
         );
 
         const newDistrictData = new Map<string, DistrictData>();
-        const priceValues: number[] = [];
-        const pricePerSqmValues: number[] = [];
         
         districtGroups.forEach((group, district) => {
-            const priceValues = group.map(p => p.price);
-            const pricePerSqmValues = group.map(p => p.price / (p.living_area || 1));
+            const prices = group.map(p => p.price);
+            const pricePerSqm = group.map(p => p.price / (p.living_area || 1));
             
             newDistrictData.set(district, {
                 district,
-                avg_price: d3.mean(priceValues) || 0,
-                median_price: d3.median(priceValues) || 0,
-                avg_price_per_sqm: d3.mean(pricePerSqmValues) || 0,
-                median_price_per_sqm: d3.median(pricePerSqmValues) || 0,
+                avg_price: d3.mean(prices) || 0,
+                median_price: d3.median(prices) || 0,
+                avg_price_per_sqm: d3.mean(pricePerSqm) || 0,
+                median_price_per_sqm: d3.median(pricePerSqm) || 0,
                 count: group.length
             });
         });

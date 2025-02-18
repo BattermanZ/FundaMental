@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab, Paper, Stack } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -9,6 +9,8 @@ import dayjs, { Dayjs } from 'dayjs';
 import PropertyMap from './components/PropertyMap';
 import PropertyStats from './components/PropertyStats';
 import PropertyCharts from './components/PropertyCharts';
+import MetropolitanAreaList from './components/MetropolitanAreaList';
+import MetropolitanAreaSelector from './components/MetropolitanAreaSelector';
 
 const StyledContainer = styled(Container)(({ theme }) => ({
     marginTop: theme.spacing(4),
@@ -22,6 +24,7 @@ const StyledSection = styled(Box)(({ theme }) => ({
 const DashboardPage = () => {
     const [startDate, setStartDate] = useState<Dayjs | null>(dayjs().subtract(1, 'year'));
     const [endDate, setEndDate] = useState<Dayjs | null>(dayjs());
+    const [selectedMetroArea, setSelectedMetroArea] = useState<number | null>(null);
 
     const dateRange = {
         startDate: startDate?.format('YYYY-MM-DD'),
@@ -33,26 +36,32 @@ const DashboardPage = () => {
             <StyledSection>
                 <Paper sx={{ p: 2, mb: 3 }}>
                     <Typography variant="h6" gutterBottom>
-                        Date Range Filter
+                        Filters
                     </Typography>
-                    <Stack direction="row" spacing={2}>
-                        <DatePicker
-                            label="Start Date"
-                            value={startDate}
-                            onChange={(newValue) => setStartDate(newValue)}
-                            maxDate={endDate || undefined}
-                            slotProps={{
-                                textField: { fullWidth: true }
-                            }}
-                        />
-                        <DatePicker
-                            label="End Date"
-                            value={endDate}
-                            onChange={(newValue) => setEndDate(newValue)}
-                            minDate={startDate || undefined}
-                            slotProps={{
-                                textField: { fullWidth: true }
-                            }}
+                    <Stack spacing={2}>
+                        <Stack direction="row" spacing={2}>
+                            <DatePicker
+                                label="Start Date"
+                                value={startDate}
+                                onChange={(newValue) => setStartDate(newValue)}
+                                maxDate={endDate || undefined}
+                                slotProps={{
+                                    textField: { fullWidth: true }
+                                }}
+                            />
+                            <DatePicker
+                                label="End Date"
+                                value={endDate}
+                                onChange={(newValue) => setEndDate(newValue)}
+                                minDate={startDate || undefined}
+                                slotProps={{
+                                    textField: { fullWidth: true }
+                                }}
+                            />
+                        </Stack>
+                        <MetropolitanAreaSelector
+                            value={selectedMetroArea}
+                            onChange={setSelectedMetroArea}
                         />
                     </Stack>
                 </Paper>
@@ -62,25 +71,48 @@ const DashboardPage = () => {
                 <Typography variant="h4" gutterBottom>
                     Property Statistics
                 </Typography>
-                <PropertyStats dateRange={dateRange} />
+                <PropertyStats dateRange={dateRange} metropolitanAreaId={selectedMetroArea} />
             </StyledSection>
 
             <StyledSection>
                 <Typography variant="h4" gutterBottom>
                     Property Map
                 </Typography>
-                <PropertyMap dateRange={dateRange} />
+                <PropertyMap dateRange={dateRange} metropolitanAreaId={selectedMetroArea} />
             </StyledSection>
         </>
     );
 };
 
-const AnalyticsPage = () => (
+const AnalyticsPage = () => {
+    const [selectedMetroArea, setSelectedMetroArea] = useState<number | null>(null);
+
+    return (
+        <>
+            <StyledSection>
+                <Paper sx={{ p: 2, mb: 3 }}>
+                    <MetropolitanAreaSelector
+                        value={selectedMetroArea}
+                        onChange={setSelectedMetroArea}
+                    />
+                </Paper>
+            </StyledSection>
+            <StyledSection>
+                <Typography variant="h4" gutterBottom>
+                    Property Analysis
+                </Typography>
+                <PropertyCharts metropolitanAreaId={selectedMetroArea} />
+            </StyledSection>
+        </>
+    );
+};
+
+const ConfigPage = () => (
     <StyledSection>
         <Typography variant="h4" gutterBottom>
-            Property Analysis
+            Metropolitan Area Configuration
         </Typography>
-        <PropertyCharts />
+        <MetropolitanAreaList />
     </StyledSection>
 );
 
@@ -101,6 +133,7 @@ const Navigation = () => {
         >
             <Tab label="Dashboard" value="/" />
             <Tab label="Analytics" value="/analytics" />
+            <Tab label="Configuration" value="/config" />
         </Tabs>
     );
 };
@@ -124,6 +157,7 @@ function App() {
                         <Routes>
                             <Route path="/" element={<DashboardPage />} />
                             <Route path="/analytics" element={<AnalyticsPage />} />
+                            <Route path="/config" element={<ConfigPage />} />
                         </Routes>
                     </StyledContainer>
                 </Box>
