@@ -11,6 +11,7 @@ import PropertyStats from './components/PropertyStats';
 import PropertyCharts from './components/PropertyCharts';
 import MetropolitanAreaList from './components/MetropolitanAreaList';
 import MetropolitanAreaSelector from './components/MetropolitanAreaSelector';
+import TelegramConfig from './components/TelegramConfig';
 
 // Create Metropolitan Context
 interface MetropolitanContextType {
@@ -110,12 +111,21 @@ const AnalyticsPage = () => {
 };
 
 const ConfigPage = () => (
-    <StyledSection>
-        <Typography variant="h4" gutterBottom>
-            Metropolitan Area Configuration
-        </Typography>
-        <MetropolitanAreaList />
-    </StyledSection>
+    <>
+        <StyledSection>
+            <Typography variant="h4" gutterBottom>
+                Metropolitan Area Configuration
+            </Typography>
+            <MetropolitanAreaList />
+        </StyledSection>
+
+        <StyledSection>
+            <Typography variant="h4" gutterBottom>
+                Notifications
+            </Typography>
+            <TelegramConfig />
+        </StyledSection>
+    </>
 );
 
 // Navigation component

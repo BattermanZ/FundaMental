@@ -16,14 +16,18 @@ interface MetropolitanAreaSelectorProps {
 
 const MetropolitanAreaSelector: React.FC<MetropolitanAreaSelectorProps> = ({ value, onChange }) => {
     const [areas, setAreas] = useState<MetropolitanArea[]>([]);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchAreas = async () => {
             try {
                 const data = await api.getMetropolitanAreas();
-                setAreas(data);
+                setAreas(data || []);
             } catch (error) {
                 console.error('Failed to fetch metropolitan areas:', error);
+                setAreas([]);
+            } finally {
+                setLoading(false);
             }
         };
         fetchAreas();
@@ -43,6 +47,7 @@ const MetropolitanAreaSelector: React.FC<MetropolitanAreaSelectorProps> = ({ val
                 value={value ?? ''}
                 label="Metropolitan Area"
                 onChange={handleChange}
+                disabled={loading}
             >
                 <MenuItem value="">
                     <em>All Areas</em>

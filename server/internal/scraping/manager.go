@@ -10,16 +10,18 @@ import (
 	"path/filepath"
 
 	"fundamental/server/internal/geocoding"
+	"fundamental/server/internal/telegram"
 
 	"github.com/sirupsen/logrus"
 )
 
 // SpiderManager handles the execution of Scrapy spiders
 type SpiderManager struct {
-	logger     *logrus.Logger
-	scriptPath string
-	db         *database.Database
-	geocoder   *geocoding.Geocoder
+	logger          *logrus.Logger
+	scriptPath      string
+	db              *database.Database
+	geocoder        *geocoding.Geocoder
+	telegramService *telegram.Service
 }
 
 // SpiderParams contains parameters for running a spider
@@ -53,14 +55,17 @@ func NewSpiderManager(db *database.Database, logger *logrus.Logger) *SpiderManag
 	}
 
 	// Initialize geocoder
-	cacheDir := filepath.Join(os.TempDir(), "fundamental", "geocode_cache")
-	geocoder := geocoding.NewGeocoder(logger, cacheDir)
+	geocoder := geocoding.NewGeocoder(logger, "")
+
+	// Initialize telegram service
+	telegramService := telegram.NewService(logger)
 
 	return &SpiderManager{
-		logger:     logger,
-		scriptPath: absPath,
-		db:         db,
-		geocoder:   geocoder,
+		logger:          logger,
+		scriptPath:      absPath,
+		db:              db,
+		geocoder:        geocoder,
+		telegramService: telegramService,
 	}
 }
 
@@ -138,7 +143,8 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 				}
 				m.logger.WithField("items", items).Info("Received items from spider")
 				// Process items using InsertProperties
-				if err := m.db.InsertProperties(items); err != nil {
+				newProperties, err := m.db.InsertProperties(items)
+				if err != nil {
 					m.logger.WithError(err).Error("Failed to store properties")
 				} else {
 					// After successful insertion, trigger geocoding in a background goroutine
@@ -148,6 +154,22 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 							m.logger.WithError(err).Error("Failed to update coordinates for new properties")
 						}
 					}()
+
+					// Send notifications for new properties
+					if len(newProperties) > 0 {
+						// Get the current Telegram configuration
+						config, err := m.db.GetTelegramConfig()
+						if err != nil {
+							m.logger.WithError(err).Error("Failed to get Telegram config")
+						} else if config != nil {
+							m.telegramService.UpdateConfig(config)
+							for _, prop := range newProperties {
+								if err := m.telegramService.NotifyNewProperty(prop); err != nil {
+									m.logger.WithError(err).Error("Failed to send Telegram notification")
+								}
+							}
+						}
+					}
 				}
 			case "error":
 				var errorData map[string]interface{}

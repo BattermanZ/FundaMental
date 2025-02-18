@@ -87,5 +87,16 @@ export const api = {
 
     deleteMetropolitanArea: async (name: string): Promise<void> => {
         await axiosInstance.delete(`/metropolitan/${name}`);
+    },
+
+    // Telegram configuration endpoints
+    getTelegramConfig: async () => {
+        const response = await axiosInstance.get('/telegram/config');
+        return response.data;
+    },
+
+    updateTelegramConfig: async (config: { bot_token: string; chat_id: string; is_enabled: boolean }) => {
+        const response = await axiosInstance.post('/telegram/config', config);
+        return response.data;
     }
 }; 

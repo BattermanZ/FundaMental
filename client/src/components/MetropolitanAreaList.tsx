@@ -11,7 +11,8 @@ import {
     TableContainer,
     TableHead,
     TableRow,
-    Typography
+    Typography,
+    CircularProgress
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -24,13 +25,18 @@ const MetropolitanAreaList: React.FC = () => {
     const [openForm, setOpenForm] = useState(false);
     const [selectedArea, setSelectedArea] = useState<MetropolitanArea | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     const fetchAreas = async () => {
         try {
+            setLoading(true);
+            setError(null);
             const data = await api.getMetropolitanAreas();
-            setAreas(data);
+            setAreas(data || []);
         } catch (error) {
             console.error('Failed to fetch metropolitan areas:', error);
+            setError('Failed to load metropolitan areas. Please try again.');
+            setAreas([]);
         } finally {
             setLoading(false);
         }
@@ -52,6 +58,7 @@ const MetropolitanAreaList: React.FC = () => {
                 await fetchAreas();
             } catch (error) {
                 console.error('Failed to delete metropolitan area:', error);
+                setError('Failed to delete metropolitan area. Please try again.');
             }
         }
     };
@@ -64,14 +71,20 @@ const MetropolitanAreaList: React.FC = () => {
 
     if (loading) {
         return (
-            <Box sx={{ p: 2 }}>
-                <Typography>Loading metropolitan areas...</Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                <CircularProgress />
             </Box>
         );
     }
 
     return (
         <Box>
+            {error && (
+                <Box sx={{ mb: 2 }}>
+                    <Typography color="error">{error}</Typography>
+                </Box>
+            )}
+            
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h5">Metropolitan Areas</Typography>
                 <Button
@@ -96,20 +109,30 @@ const MetropolitanAreaList: React.FC = () => {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {areas.map((area) => (
-                            <TableRow key={area.name}>
-                                <TableCell>{area.name}</TableCell>
-                                <TableCell>{area.cities.join(', ')}</TableCell>
-                                <TableCell align="right">
-                                    <IconButton onClick={() => handleEdit(area)} color="primary">
-                                        <EditIcon />
-                                    </IconButton>
-                                    <IconButton onClick={() => handleDelete(area)} color="error">
-                                        <DeleteIcon />
-                                    </IconButton>
+                        {areas.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={3} align="center">
+                                    <Typography color="textSecondary">
+                                        No metropolitan areas found. Click "Add New Area" to create one.
+                                    </Typography>
                                 </TableCell>
                             </TableRow>
-                        ))}
+                        ) : (
+                            areas.map((area) => (
+                                <TableRow key={area.name}>
+                                    <TableCell>{area.name}</TableCell>
+                                    <TableCell>{area.cities.join(', ')}</TableCell>
+                                    <TableCell align="right">
+                                        <IconButton onClick={() => handleEdit(area)} color="primary">
+                                            <EditIcon />
+                                        </IconButton>
+                                        <IconButton onClick={() => handleDelete(area)} color="error">
+                                            <DeleteIcon />
+                                        </IconButton>
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
                     </TableBody>
                 </Table>
             </TableContainer>

@@ -389,6 +389,21 @@ func (d *Database) RunMigrations() error {
 		return fmt.Errorf("failed to create metropolitan_areas table: %v", err)
 	}
 
+	// Create telegram configuration table
+	_, err = d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS telegram_config (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			bot_token TEXT NOT NULL,
+			chat_id TEXT NOT NULL,
+			is_enabled BOOLEAN DEFAULT 1,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create telegram_config table: %v", err)
+	}
+
 	// Create metropolitan cities table without the foreign key constraint
 	_, err = d.db.Exec(`
 		CREATE TABLE IF NOT EXISTS metropolitan_cities (
@@ -596,27 +611,45 @@ func (d *Database) GetDB() *sql.DB {
 	return d.db
 }
 
-// InsertProperties inserts a batch of properties into the database
-func (d *Database) InsertProperties(properties []map[string]interface{}) error {
+// InsertProperties inserts a batch of properties into the database and returns the newly inserted ones
+func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[string]interface{}, error) {
 	tx, err := d.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`
-		INSERT OR REPLACE INTO properties 
+	// Prepare statement for checking existing properties
+	checkStmt, err := tx.Prepare("SELECT 1 FROM properties WHERE url = ?")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare check statement: %w", err)
+	}
+	defer checkStmt.Close()
+
+	// Prepare statement for inserting properties
+	insertStmt, err := tx.Prepare(`
+		INSERT INTO properties 
 		(url, street, neighborhood, property_type, city, postal_code, price, year_built, 
 		 living_area, num_rooms, status, listing_date, selling_date, scraped_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
+		return nil, fmt.Errorf("failed to prepare insert statement: %w", err)
 	}
-	defer stmt.Close()
+	defer insertStmt.Close()
+
+	var newProperties []map[string]interface{}
 
 	for _, prop := range properties {
-		_, err = stmt.Exec(
+		// Check if property already exists
+		var exists bool
+		err = checkStmt.QueryRow(prop["url"]).Scan(&exists)
+		if err != sql.ErrNoRows {
+			continue // Property already exists
+		}
+
+		// Insert the property
+		_, err = insertStmt.Exec(
 			prop["url"],
 			prop["street"],
 			prop["neighborhood"],
@@ -633,15 +666,17 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) error {
 			prop["scraped_at"],
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert property: %w", err)
+			return nil, fmt.Errorf("failed to insert property: %w", err)
 		}
+
+		newProperties = append(newProperties, prop)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return nil
+	return newProperties, nil
 }
 
 // GetMetropolitanAreas returns all metropolitan areas
@@ -815,4 +850,46 @@ func (d *Database) cityExists(city string) (bool, error) {
 	var exists bool
 	err := d.db.QueryRow("SELECT EXISTS(SELECT 1 FROM properties WHERE LOWER(city) = LOWER(?) LIMIT 1)", city).Scan(&exists)
 	return exists, err
+}
+
+// GetTelegramConfig returns the current Telegram configuration
+func (d *Database) GetTelegramConfig() (*models.TelegramConfig, error) {
+	var config models.TelegramConfig
+	err := d.db.QueryRow(`
+		SELECT id, bot_token, chat_id, is_enabled, created_at, updated_at
+		FROM telegram_config
+		ORDER BY id DESC
+		LIMIT 1
+	`).Scan(
+		&config.ID,
+		&config.BotToken,
+		&config.ChatID,
+		&config.IsEnabled,
+		&config.CreatedAt,
+		&config.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get telegram config: %v", err)
+	}
+	return &config, nil
+}
+
+// UpdateTelegramConfig updates or creates the Telegram configuration
+func (d *Database) UpdateTelegramConfig(config *models.TelegramConfigRequest) error {
+	_, err := d.db.Exec(`
+		INSERT OR REPLACE INTO telegram_config
+		(bot_token, chat_id, is_enabled, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+	`,
+		config.BotToken,
+		config.ChatID,
+		config.IsEnabled,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update telegram config: %v", err)
+	}
+	return nil
 }

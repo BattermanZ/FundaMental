@@ -1,10 +1,13 @@
 package api
 
 import (
+	"fmt"
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
 	"fundamental/server/internal/geometry"
+	"fundamental/server/internal/models"
 	"fundamental/server/internal/scraping"
+	"fundamental/server/internal/telegram"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +23,7 @@ type Handler struct {
 	geocoder        *geocoding.Geocoder
 	districtManager *geometry.DistrictManager
 	spiderManager   *scraping.SpiderManager
+	telegramService *telegram.Service
 }
 
 type DateRange struct {
@@ -48,12 +52,21 @@ func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
 	// Initialize the spider manager
 	spiderManager := scraping.NewSpiderManager(db, logger)
 
+	// Initialize the telegram service
+	telegramService := telegram.NewService(logger)
+
+	// Load existing Telegram configuration
+	if config, err := db.GetTelegramConfig(); err == nil && config != nil {
+		telegramService.UpdateConfig(config)
+	}
+
 	return &Handler{
 		db:              db,
 		logger:          logger,
 		geocoder:        geocoding.NewGeocoder(logger, cacheDir),
 		districtManager: districtManager,
 		spiderManager:   spiderManager,
+		telegramService: telegramService,
 	}
 }
 
@@ -198,4 +211,67 @@ func (h *Handler) RunSoldSpider(c *gin.Context) {
 		"status":  "success",
 		"message": "Sold spider started successfully",
 	})
+}
+
+// GetTelegramConfig returns the current Telegram configuration
+func (h *Handler) GetTelegramConfig(c *gin.Context) {
+	config, err := h.db.GetTelegramConfig()
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to get Telegram config")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get Telegram config"})
+		return
+	}
+
+	if config == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"is_enabled": false,
+			"chat_id":    "",
+			"bot_token":  "",
+		})
+		return
+	}
+
+	// Don't send the full bot token back to the client for security
+	config.BotToken = "••••" + config.BotToken[len(config.BotToken)-4:]
+	c.JSON(http.StatusOK, config)
+}
+
+// UpdateTelegramConfig updates the Telegram configuration
+func (h *Handler) UpdateTelegramConfig(c *gin.Context) {
+	var request models.TelegramConfigRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		h.logger.WithError(err).Error("Invalid request body")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Test the Telegram configuration before saving
+	testService := telegram.NewService(h.logger)
+	testConfig := &models.TelegramConfig{
+		BotToken:  request.BotToken,
+		ChatID:    request.ChatID,
+		IsEnabled: true,
+	}
+	testService.UpdateConfig(testConfig)
+
+	testMessage := "🔔 Test notification from FundaMental\n\nIf you see this message, your Telegram configuration is working correctly!"
+	if err := testService.SendMessage(testMessage); err != nil {
+		h.logger.WithError(err).Error("Failed to send test message")
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to send test message: %v", err)})
+		return
+	}
+
+	// Save the configuration
+	if err := h.db.UpdateTelegramConfig(&request); err != nil {
+		h.logger.WithError(err).Error("Failed to update Telegram config")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update Telegram config"})
+		return
+	}
+
+	// Update the service configuration
+	if config, err := h.db.GetTelegramConfig(); err == nil && config != nil {
+		h.telegramService.UpdateConfig(config)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Telegram configuration updated successfully"})
 }
