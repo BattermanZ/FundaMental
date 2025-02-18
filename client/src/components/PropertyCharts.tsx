@@ -129,26 +129,24 @@ const PropertyCharts: React.FC = () => {
     // Memoize filtered properties
     const filteredPropertiesMemo = useMemo(() => {
         return properties.filter(property => {
-            // Date filter - check both listing_date and selling_date
+            // Date filter - check listing_date/scraped_at for active and selling_date for sold
             if (filters.startDate) {
-                const listingDate = dayjs(property.listing_date);
-                const sellingDate = property.selling_date ? dayjs(property.selling_date) : null;
+                const effectiveDate = property.status === 'active' 
+                    ? (property.listing_date ? dayjs(property.listing_date) : dayjs(property.scraped_at))
+                    : (property.selling_date ? dayjs(property.selling_date) : null);
                 
-                if (property.status === 'sold' && sellingDate) {
-                    if (sellingDate.isBefore(filters.startDate)) return false;
-                } else {
-                    if (listingDate.isBefore(filters.startDate)) return false;
+                if (effectiveDate && effectiveDate.isBefore(filters.startDate)) {
+                    return false;
                 }
             }
             
             if (filters.endDate) {
-                const listingDate = dayjs(property.listing_date);
-                const sellingDate = property.selling_date ? dayjs(property.selling_date) : null;
+                const effectiveDate = property.status === 'active' 
+                    ? (property.listing_date ? dayjs(property.listing_date) : dayjs(property.scraped_at))
+                    : (property.selling_date ? dayjs(property.selling_date) : null);
                 
-                if (property.status === 'sold' && sellingDate) {
-                    if (sellingDate.isAfter(filters.endDate)) return false;
-                } else {
-                    if (listingDate.isAfter(filters.endDate)) return false;
+                if (effectiveDate && effectiveDate.isAfter(filters.endDate)) {
+                    return false;
                 }
             }
             
@@ -199,14 +197,29 @@ const PropertyCharts: React.FC = () => {
     }, [filteredPropertiesMemo]);
 
     const timeSeriesData = useMemo(() => {
+        // Separate active and sold properties
         const soldProperties = filteredPropertiesMemo
             .filter(p => p.status === 'sold' && p.selling_date)
             .sort((a, b) => new Date(a.selling_date).getTime() - new Date(b.selling_date).getTime());
 
-        if (soldProperties.length === 0) return [];
+        const activeProperties = filteredPropertiesMemo
+            .filter(p => p.status === 'active')
+            .map(p => ({
+                ...p,
+                effectiveDate: p.listing_date || p.scraped_at
+            }))
+            .sort((a, b) => new Date(a.effectiveDate).getTime() - new Date(b.effectiveDate).getTime());
 
-        const startDate = dayjs(soldProperties[0].selling_date).startOf('month');
-        const endDate = dayjs(soldProperties[soldProperties.length - 1].selling_date).endOf('month');
+        if (soldProperties.length === 0 && activeProperties.length === 0) return [];
+
+        // Determine date range
+        const dates = [
+            ...soldProperties.map(p => p.selling_date),
+            ...activeProperties.map(p => p.effectiveDate)
+        ].filter(Boolean);
+
+        const startDate = dayjs(Math.min(...dates.map(d => new Date(d).getTime()))).startOf('month');
+        const endDate = dayjs(Math.max(...dates.map(d => new Date(d).getTime()))).endOf('month');
         
         const months: string[] = [];
         let currentDate = startDate;
@@ -215,21 +228,31 @@ const PropertyCharts: React.FC = () => {
             currentDate = currentDate.add(1, 'month');
         }
 
-        const monthlyGroups = d3.group(soldProperties, d => 
+        // Group properties by month
+        const soldMonthlyGroups = d3.group(soldProperties, d => 
             dayjs(d.selling_date).format('YYYY-MM')
         );
 
+        const activeMonthlyGroups = d3.group(activeProperties, d => 
+            dayjs(d.effectiveDate).format('YYYY-MM')
+        );
+
         return months.map(month => {
-            const group = monthlyGroups.get(month) || [];
+            const soldGroup = soldMonthlyGroups.get(month) || [];
+            const activeGroup = activeMonthlyGroups.get(month) || [];
+            const allProperties = [...soldGroup, ...activeGroup];
+
             return {
                 month,
-                avg_price: d3.mean(group, d => d.price) || 0,
-                median_price: d3.median(group, d => d.price) || 0,
-                avg_days_to_sell: d3.mean(group, d => {
+                avg_price: d3.mean(allProperties, d => d.price) || 0,
+                median_price: d3.median(allProperties, d => d.price) || 0,
+                avg_days_to_sell: d3.mean(soldGroup, d => {
                     if (!d.listing_date || !d.selling_date) return null;
                     return (new Date(d.selling_date).getTime() - new Date(d.listing_date).getTime()) / (1000 * 60 * 60 * 24);
                 }) || 0,
-                count: group.length
+                count: allProperties.length,
+                active_count: activeGroup.length,
+                sold_count: soldGroup.length
             };
         });
     }, [filteredPropertiesMemo]);
@@ -519,36 +542,36 @@ const PropertyCharts: React.FC = () => {
                             Price Trends Over Time
                         </Typography>
                         <ResponsiveContainer width="100%" height={400}>
-                            <ComposedChart data={timeSeriesData} margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
+                            <ComposedChart data={timeSeriesData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }}>
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="month" />
+                                <XAxis 
+                                    dataKey="month" 
+                                    tickFormatter={(value) => dayjs(value).format('MMM YY')}
+                                />
                                 <YAxis 
                                     yAxisId="left"
-                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                    orientation="left"
+                                    tickFormatter={(value) => value.toFixed(0)}
                                 >
-                                    <Label value="Price (€)" angle={-90} position="insideLeft" offset={10} />
+                                    <Label value="Number of Properties" angle={-90} position="insideLeft" offset={10} />
                                 </YAxis>
                                 <YAxis 
-                                    yAxisId="right" 
+                                    yAxisId="right"
                                     orientation="right"
-                                    label={{ value: 'Days to Sell', angle: 90, position: 'insideRight' }}
+                                    tickFormatter={(value) => value.toFixed(0)}
+                                >
+                                    <Label value="Days to Sell" angle={90} position="insideRight" offset={10} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any, name: string) => {
+                                        if (name === 'avg_days_to_sell') return [value.toFixed(1), 'Avg Days to Sell'];
+                                        if (name === 'active_count') return [value, 'Active Properties'];
+                                        if (name === 'sold_count') return [value, 'Sold Properties'];
+                                        return [value, name];
+                                    }}
+                                    labelFormatter={(label) => dayjs(label).format('MMMM YYYY')}
                                 />
-                                <Tooltip />
                                 <Legend />
-                                <Line
-                                    yAxisId="left"
-                                    type="monotone"
-                                    dataKey="avg_price"
-                                    stroke="#8884d8"
-                                    name="Average Price"
-                                />
-                                <Line
-                                    yAxisId="left"
-                                    type="monotone"
-                                    dataKey="median_price"
-                                    stroke="#82ca9d"
-                                    name="Median Price"
-                                />
                                 <Line
                                     yAxisId="right"
                                     type="monotone"
@@ -559,10 +582,22 @@ const PropertyCharts: React.FC = () => {
                                 <Area
                                     yAxisId="left"
                                     type="monotone"
-                                    dataKey="count"
-                                    fill="#8884d8"
+                                    dataKey="active_count"
+                                    fill="#82ca9d"
+                                    stroke="#82ca9d"
                                     opacity={0.1}
-                                    name="Number of Sales"
+                                    name="Active Properties"
+                                    stackId="1"
+                                />
+                                <Area
+                                    yAxisId="left"
+                                    type="monotone"
+                                    dataKey="sold_count"
+                                    fill="#8884d8"
+                                    stroke="#8884d8"
+                                    opacity={0.1}
+                                    name="Sold Properties"
+                                    stackId="1"
                                 />
                             </ComposedChart>
                         </ResponsiveContainer>
