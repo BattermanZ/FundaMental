@@ -62,12 +62,26 @@ class FundaDB:
             
             conn.commit()
 
+    def get_property_status(self, url):
+        """Get the current status of a property."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT status FROM properties WHERE url = ?', (url,))
+            result = cursor.fetchone()
+            return result[0] if result else None
+
     def insert_property(self, item):
-        """Insert a property into the database."""
+        """Insert or update a property in the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
             try:
+                # Check if this is a republished listing
+                current_status = self.get_property_status(item.get('url'))
+                if current_status == 'inactive' and item.get('status') == 'active':
+                    # This is a republished listing
+                    item['status'] = 'republished'
+                
                 # First try to update if the property exists
                 cursor.execute('''
                     UPDATE properties 
@@ -148,8 +162,8 @@ class FundaDB:
             return {row[0] for row in cursor.fetchall()}
 
     def get_all_active_urls(self):
-        """Get URLs of all properties that are either active or inactive (not sold)."""
+        """Get URLs of all properties that are either active, inactive, or republished (not sold)."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT url FROM properties WHERE status IN ("active", "inactive")')
+            cursor.execute('SELECT url FROM properties WHERE status IN ("active", "inactive", "republished")')
             return {row[0] for row in cursor.fetchall()} 

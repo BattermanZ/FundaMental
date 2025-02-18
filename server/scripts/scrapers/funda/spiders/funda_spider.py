@@ -192,7 +192,15 @@ class FundaSpider(scrapy.Spider):
             self.logger.error(f"Blocked or verification required for URL: {response.url}")
             return
 
-        item = FundaItem(url=response.url, status='active')
+        # Get current status from database
+        current_status = self.db.get_property_status(response.url)
+        
+        # Initialize item with appropriate status
+        if current_status == 'inactive':
+            self.logger.info(f"Found republished listing: {response.url}")
+            item = FundaItem(url=response.url, status='republished')
+        else:
+            item = FundaItem(url=response.url, status='active')
         
         # Extract address from the page content
         # Try multiple selectors for the address
