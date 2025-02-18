@@ -99,6 +99,19 @@ const PropertyStats: React.FC<PropertyStatsProps> = ({ dateRange }) => {
                 <StyledCard>
                     <CardContent>
                         <TitleTypography color="textSecondary" gutterBottom>
+                            Total Active
+                        </TitleTypography>
+                        <ValueTypography variant="h5">
+                            {stats.total_active}
+                        </ValueTypography>
+                    </CardContent>
+                </StyledCard>
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={4}>
+                <StyledCard>
+                    <CardContent>
+                        <TitleTypography color="textSecondary" gutterBottom>
                             Total Sold
                         </TitleTypography>
                         <ValueTypography variant="h5">

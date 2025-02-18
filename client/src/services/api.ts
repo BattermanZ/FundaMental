@@ -21,21 +21,21 @@ export const api = {
     },
 
     getPropertyStats: async (dateRange: DateRange): Promise<PropertyStats> => {
-        const response = await axiosInstance.get('/stats', {
+        const response = await axiosInstance.get('/properties/stats', {
             params: dateRange
         });
         return response.data;
     },
 
     getAreaStats: async (postalPrefix: string, dateRange: DateRange): Promise<AreaStats> => {
-        const response = await axiosInstance.get(`/areas/${postalPrefix}`, {
+        const response = await axiosInstance.get(`/properties/area/${postalPrefix}`, {
             params: dateRange
         });
         return response.data;
     },
 
     getRecentSales: async (limit: number = 10, dateRange: DateRange): Promise<Property[]> => {
-        const response = await axiosInstance.get('/recent-sales', {
+        const response = await axiosInstance.get('/properties/recent', {
             params: { 
                 limit,
                 ...dateRange
@@ -46,6 +46,6 @@ export const api = {
 
     // Add a method to trigger geocoding manually if needed
     updateCoordinates: async (): Promise<void> => {
-        await axiosInstance.post('/update-coordinates');
+        await axiosInstance.post('/geocode/update');
     }
 }; 

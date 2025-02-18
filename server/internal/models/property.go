@@ -29,6 +29,7 @@ type PropertyStats struct {
 	MedianPrice     float64 `json:"median_price"`
 	AvgDaysToSell   float64 `json:"avg_days_to_sell"`
 	TotalSold       int     `json:"total_sold"`
+	TotalActive     int     `json:"total_active"`
 	PricePerSqm     float64 `json:"price_per_sqm"`
 }
 

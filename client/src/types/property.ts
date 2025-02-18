@@ -25,6 +25,7 @@ export interface PropertyStats {
     median_price: number;
     avg_days_to_sell: number;
     total_sold: number;
+    total_active: number;
     price_per_sqm: number;
 }
 

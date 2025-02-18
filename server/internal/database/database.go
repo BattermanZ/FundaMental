@@ -179,36 +179,80 @@ func (d *Database) GetAllProperties(startDate, endDate string) ([]models.Propert
 
 func (d *Database) GetPropertyStats(startDate, endDate string) (models.PropertyStats, error) {
 	query := `
+        WITH price_data AS (
+            SELECT 
+                price,
+                living_area,
+                status,
+                COALESCE(listing_date, scraped_at) as effective_date,
+                selling_date,
+                CASE 
+                    WHEN listing_date IS NOT NULL AND selling_date IS NOT NULL 
+                    THEN julianday(selling_date) - julianday(listing_date) 
+                END as days_to_sell
+            FROM properties
+            WHERE price IS NOT NULL
+            AND (
+                -- For active properties, check effective_date (listing_date or scraped_at)
+                (status = 'active' AND (
+                    ? = '' OR COALESCE(listing_date, scraped_at) >= ?
+                ) AND (
+                    ? = '' OR COALESCE(listing_date, scraped_at) <= ?
+                ))
+                OR
+                -- For sold properties, check selling_date
+                (status = 'sold' AND (
+                    ? = '' OR selling_date >= ?
+                ) AND (
+                    ? = '' OR selling_date <= ?
+                ))
+            )
+        ),
+        active_stats AS (
+            SELECT 
+                COUNT(*) as active_count,
+                COALESCE(AVG(price), 0) as active_avg_price,
+                COALESCE(AVG(CAST(price AS FLOAT) / NULLIF(living_area, 0)), 0) as active_price_per_sqm
+            FROM price_data
+            WHERE status = 'active'
+        ),
+        sold_stats AS (
+            SELECT 
+                COUNT(*) as sold_count,
+                COALESCE(AVG(price), 0) as sold_avg_price,
+                COALESCE(AVG(days_to_sell), 0) as avg_days_to_sell,
+                COALESCE(AVG(CAST(price AS FLOAT) / NULLIF(living_area, 0)), 0) as sold_price_per_sqm
+            FROM price_data
+            WHERE status = 'sold'
+        )
         SELECT 
-            COUNT(*) as total_properties,
-            AVG(price) as average_price,
-            AVG(CASE 
-                WHEN listing_date IS NOT NULL AND selling_date IS NOT NULL 
-                THEN julianday(selling_date) - julianday(listing_date) 
-                END) as avg_days_to_sell,
-            COUNT(CASE WHEN status = 'sold' THEN 1 END) as total_sold,
-            AVG(CAST(price AS FLOAT) / NULLIF(living_area, 0)) as price_per_sqm
-        FROM properties
-        WHERE 1=1
+            COALESCE(active_count + sold_count, 0) as total_properties,
+            CASE 
+                WHEN (active_count + sold_count) > 0 
+                THEN ROUND(COALESCE(((active_avg_price * active_count) + (sold_avg_price * sold_count)) / NULLIF((active_count + sold_count), 0), 0))
+                ELSE 0 
+            END as average_price,
+            CASE 
+                WHEN (active_count + sold_count) > 0 
+                THEN ROUND(COALESCE(((active_price_per_sqm * active_count) + (sold_price_per_sqm * sold_count)) / NULLIF((active_count + sold_count), 0), 0))
+                ELSE 0 
+            END as price_per_sqm,
+            COALESCE(avg_days_to_sell, 0) as avg_days_to_sell,
+            COALESCE(sold_count, 0) as total_sold,
+            COALESCE(active_count, 0) as total_active
+        FROM active_stats, sold_stats
     `
 	var args []interface{}
-
-	if startDate != "" {
-		query += " AND (listing_date >= ? OR selling_date >= ?)"
-		args = append(args, startDate, startDate)
-	}
-	if endDate != "" {
-		query += " AND (listing_date <= ? OR selling_date <= ?)"
-		args = append(args, endDate, endDate)
-	}
+	args = append(args, startDate, startDate, endDate, endDate, startDate, startDate, endDate, endDate)
 
 	var stats models.PropertyStats
 	err := d.db.QueryRow(query, args...).Scan(
 		&stats.TotalProperties,
 		&stats.AveragePrice,
+		&stats.PricePerSqm,
 		&stats.AvgDaysToSell,
 		&stats.TotalSold,
-		&stats.PricePerSqm,
+		&stats.TotalActive,
 	)
 	return stats, err
 }
