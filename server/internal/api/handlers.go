@@ -275,3 +275,43 @@ func (h *Handler) UpdateTelegramConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Telegram configuration updated successfully"})
 }
+
+// TestTelegramConfig tests the Telegram configuration by sending a sample property notification
+func (h *Handler) TestTelegramConfig(c *gin.Context) {
+	var request models.TelegramConfigRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		h.logger.WithError(err).Error("Invalid request body")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Create a test service with the provided configuration
+	testService := telegram.NewService(h.logger)
+	testConfig := &models.TelegramConfig{
+		BotToken:  request.BotToken,
+		ChatID:    request.ChatID,
+		IsEnabled: true,
+	}
+	testService.UpdateConfig(testConfig)
+
+	// Create a sample property for testing
+	sampleProperty := map[string]interface{}{
+		"street":      "Test Street 123",
+		"city":        "Amsterdam",
+		"postal_code": "1234 AB",
+		"price":       450000,
+		"year_built":  2020,
+		"living_area": 85,
+		"num_rooms":   3,
+		"url":         "https://example.com/test-property",
+	}
+
+	// Send test notification
+	if err := testService.NotifyNewProperty(sampleProperty); err != nil {
+		h.logger.WithError(err).Error("Failed to send test notification")
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Failed to send test notification: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Test notification sent successfully"})
+}

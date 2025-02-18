@@ -10,6 +10,7 @@ import {
     Alert,
     CircularProgress,
     Link,
+    Divider
 } from '@mui/material';
 import { api } from '../services/api';
 
@@ -27,6 +28,7 @@ const TelegramConfig: React.FC = () => {
     });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [testing, setTesting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
@@ -60,9 +62,30 @@ const TelegramConfig: React.FC = () => {
         }
     };
 
+    const handleTestNotification = async () => {
+        setTesting(true);
+        setError(null);
+        setSuccess(null);
+
+        try {
+            await api.testTelegramConfig({
+                bot_token: config.bot_token,
+                chat_id: config.chat_id,
+                is_enabled: true
+            });
+            setSuccess('Test notification sent successfully! Check your Telegram.');
+        } catch (err: any) {
+            setError(err.response?.data?.error || 'Failed to send test notification');
+        } finally {
+            setTesting(false);
+        }
+    };
+
     if (loading) {
         return <CircularProgress />;
     }
+
+    const isConfigured = config.bot_token && config.chat_id;
 
     return (
         <Paper sx={{ p: 3 }}>
@@ -139,15 +162,25 @@ const TelegramConfig: React.FC = () => {
                     </Alert>
                 )}
 
-                <Button
-                    variant="contained"
-                    color="primary"
-                    type="submit"
-                    disabled={saving}
-                    sx={{ mt: 2 }}
-                >
-                    {saving ? <CircularProgress size={24} /> : 'Save Configuration'}
-                </Button>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        type="submit"
+                        disabled={saving}
+                    >
+                        {saving ? <CircularProgress size={24} /> : 'Save Configuration'}
+                    </Button>
+
+                    <Button
+                        variant="outlined"
+                        color="secondary"
+                        onClick={handleTestNotification}
+                        disabled={testing || !isConfigured}
+                    >
+                        {testing ? <CircularProgress size={24} /> : 'Send Test Notification'}
+                    </Button>
+                </Box>
             </form>
         </Paper>
     );

@@ -23,5 +23,6 @@ func SetupRoutes(router *gin.Engine, db *database.Database) {
 		// Telegram configuration routes
 		api.GET("/telegram/config", handler.GetTelegramConfig)
 		api.POST("/telegram/config", handler.UpdateTelegramConfig)
+		api.POST("/telegram/config/test", handler.TestTelegramConfig)
 	}
 }
