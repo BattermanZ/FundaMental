@@ -237,3 +237,20 @@ func (m *SpiderManager) RunSoldSpider(place string, maxPages *int, resume bool) 
 		Resume:     resume,
 	})
 }
+
+// RunRefreshSpider runs the spider to refresh active listings and mark inactive ones
+func (m *SpiderManager) RunRefreshSpider(place string) error {
+	m.logger.WithField("place", place).Info("Starting refresh spider")
+
+	// Run the active spider to collect current URLs
+	params := SpiderParams{
+		SpiderType: "refresh",
+		Place:      place,
+	}
+
+	if err := m.RunSpider(params); err != nil {
+		return fmt.Errorf("failed to run refresh spider: %v", err)
+	}
+
+	return nil
+}

@@ -929,3 +929,77 @@ func (d *Database) GetDistrictMedianPricePerSqm(district string) (float64, error
 
 	return *medianPrice, nil
 }
+
+// MarkInactiveProperties marks properties as inactive if their URLs are not in the activeURLs list
+func (d *Database) MarkInactiveProperties(city string, activeURLs []string) error {
+	// Convert activeURLs slice to a map for O(1) lookup
+	activeURLMap := make(map[string]bool)
+	for _, url := range activeURLs {
+		activeURLMap[url] = true
+	}
+
+	// Start a transaction
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Get all active properties for the city
+	rows, err := tx.Query(`
+		SELECT id, url FROM properties 
+		WHERE city = ? AND status = 'active'
+	`, city)
+	if err != nil {
+		return fmt.Errorf("failed to query active properties: %v", err)
+	}
+	defer rows.Close()
+
+	// Collect properties to mark as inactive
+	var inactiveIDs []int64
+	for rows.Next() {
+		var id int64
+		var url string
+		if err := rows.Scan(&id, &url); err != nil {
+			return fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		// If URL is not in activeURLs, mark for update
+		if !activeURLMap[url] {
+			inactiveIDs = append(inactiveIDs, id)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("error iterating rows: %v", err)
+	}
+
+	// Update properties in batches
+	if len(inactiveIDs) > 0 {
+		// Convert IDs to string for the IN clause
+		idStr := make([]string, len(inactiveIDs))
+		idArgs := make([]interface{}, len(inactiveIDs))
+		for i, id := range inactiveIDs {
+			idStr[i] = "?"
+			idArgs[i] = id
+		}
+
+		query := fmt.Sprintf(`
+			UPDATE properties 
+			SET status = 'inactive', 
+				updated_at = CURRENT_TIMESTAMP 
+			WHERE id IN (%s)
+		`, strings.Join(idStr, ","))
+
+		_, err = tx.Exec(query, idArgs...)
+		if err != nil {
+			return fmt.Errorf("failed to update inactive properties: %v", err)
+		}
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return nil
+}

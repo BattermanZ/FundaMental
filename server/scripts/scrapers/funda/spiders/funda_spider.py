@@ -33,9 +33,10 @@ class FundaSpider(scrapy.Spider):
         self.place = place
         self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
-        self.processed_urls = set()  # Track processed URLs in current run
+        self.processed_urls = set()
         self.total_items_scraped = 0
-        self.new_items_found = 0  # Track new items found
+        self.new_items_found = 0
+        self.active_urls = set()  # Track all active URLs for refresh operation
         
         # Initialize database connection for URL checking
         self.db = FundaDB()
@@ -385,6 +386,81 @@ class FundaSpider(scrapy.Spider):
         self.logger.info(f"Extracted data: {item}")
         
         return item
+
+    def collect_active_urls(self, response):
+        """
+        Collects only URLs from listing pages without visiting individual properties.
+        Used for the weekly refresh operation.
+        """
+        self.logger.info(f"Collecting URLs from page {self.page_count}")
+        
+        # Extract all listing URLs from the page
+        all_listing_urls = set()
+        
+        # 1. Try JSON-LD first
+        json_ld_scripts = response.xpath('//script[@type="application/ld+json"]/text()').getall()
+        for script in json_ld_scripts:
+            try:
+                data = json.loads(script)
+                if isinstance(data, dict) and 'itemListElement' in data:
+                    items = data['itemListElement']
+                    for item in items:
+                        url = item.get('url')
+                        if url and '/koop/' in url:
+                            all_listing_urls.add(url)
+            except json.JSONDecodeError:
+                continue
+        
+        # 2. Try HTML selectors as backup
+        html_listings = response.css('div[data-test-id="search-result-item"] a::attr(href)').getall()
+        html_listings.extend(response.css('div.search-result__header-title-col a::attr(href)').getall())
+        
+        for url in html_listings:
+            if '/koop/' in url:
+                full_url = response.urljoin(url)
+                all_listing_urls.add(full_url)
+
+        # Add all found URLs to the active_urls set
+        self.active_urls.update(all_listing_urls)
+        
+        # Handle pagination
+        if self.max_pages is None or self.page_count < self.max_pages:
+            next_page = response.css('a[data-test-id="next-page-button"]::attr(href)').get()
+            if next_page:
+                self.page_count += 1
+                next_url = response.urljoin(next_page)
+                self.logger.info(f"Moving to page {self.page_count}")
+                yield scrapy.Request(
+                    next_url,
+                    callback=self.collect_active_urls,
+                    headers=self.headers,
+                    meta={'dont_cache': True}
+                )
+
+    def refresh_active_listings(self):
+        """
+        Special method to only collect URLs for the refresh operation.
+        Returns the set of all active URLs found.
+        """
+        self.active_urls.clear()
+        self.page_count = 1
+        
+        # Construct the URL for active listings
+        params = {
+            'selected_area': json.dumps([self.place]),
+            'availability': json.dumps(['available']),
+            'object_type': json.dumps(['house', 'apartment']),
+            'sort': 'date_down'
+        }
+        
+        url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(params)}"
+        
+        return scrapy.Request(
+            url=url,
+            headers=self.headers,
+            callback=self.collect_active_urls,
+            meta={'dont_cache': True}
+        )
 
     def closed(self, reason):
         """Called when the spider is closed."""
