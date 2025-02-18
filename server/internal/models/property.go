@@ -40,3 +40,9 @@ type AreaStats struct {
 	MedianPrice    float64 `json:"median_price"`
 	AvgPricePerSqm float64 `json:"avg_price_per_sqm"`
 }
+
+type MetropolitanArea struct {
+	ID     int64    `json:"id"`
+	Name   string   `json:"name"`
+	Cities []string `json:"cities"`
+}

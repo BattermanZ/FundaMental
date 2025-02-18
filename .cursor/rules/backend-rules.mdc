@@ -18,4 +18,4 @@ globs:
 - **Deployment & Containerization:** 
   - Containerize the backend with Docker to facilitate portability and future deployment on a server if needed.
 
-The backend is in a server folder.
+The backend is in a server folder and running on port 5250

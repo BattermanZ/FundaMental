@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"fundamental/server/internal/geocoding"
 	"fundamental/server/internal/models"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -376,8 +377,39 @@ func (d *Database) Close() error {
 }
 
 func (d *Database) RunMigrations() error {
-	// Add latitude and longitude columns if they don't exist
+	// Create metropolitan areas table
 	_, err := d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS metropolitan_areas (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT UNIQUE NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create metropolitan_areas table: %v", err)
+	}
+
+	// Drop existing metropolitan_cities table if it exists
+	_, err = d.db.Exec(`DROP TABLE IF EXISTS metropolitan_cities;`)
+	if err != nil {
+		return fmt.Errorf("failed to drop metropolitan_cities table: %v", err)
+	}
+
+	// Create metropolitan cities table without the foreign key constraint
+	_, err = d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS metropolitan_cities (
+			metropolitan_area_id INTEGER,
+			city TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (metropolitan_area_id, city)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create metropolitan_cities table: %v", err)
+	}
+
+	// Add latitude and longitude columns if they don't exist
+	_, err = d.db.Exec(`
 		ALTER TABLE properties 
 		ADD COLUMN latitude REAL;
 	`)
@@ -616,4 +648,177 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) error {
 	}
 
 	return nil
+}
+
+// GetMetropolitanAreas returns all metropolitan areas
+func (d *Database) GetMetropolitanAreas() ([]models.MetropolitanArea, error) {
+	rows, err := d.db.Query(`
+		SELECT m.id, m.name, GROUP_CONCAT(mc.city, ',') as cities
+		FROM metropolitan_areas m
+		LEFT JOIN metropolitan_cities mc ON m.id = mc.metropolitan_area_id
+		GROUP BY m.id, m.name
+		ORDER BY m.id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query metropolitan areas: %v", err)
+	}
+	defer rows.Close()
+
+	var areas []models.MetropolitanArea
+	for rows.Next() {
+		var area models.MetropolitanArea
+		var citiesStr sql.NullString
+		if err := rows.Scan(&area.ID, &area.Name, &citiesStr); err != nil {
+			return nil, fmt.Errorf("failed to scan metropolitan area: %v", err)
+		}
+		if citiesStr.Valid && citiesStr.String != "" {
+			area.Cities = strings.Split(citiesStr.String, ",")
+		} else {
+			area.Cities = []string{}
+		}
+		areas = append(areas, area)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating metropolitan areas: %v", err)
+	}
+
+	return areas, nil
+}
+
+// GetMetropolitanAreaByName returns a specific metropolitan area by name
+func (d *Database) GetMetropolitanAreaByName(name string) (*models.MetropolitanArea, error) {
+	var area models.MetropolitanArea
+	var citiesStr sql.NullString
+
+	err := d.db.QueryRow(`
+		SELECT m.id, m.name, GROUP_CONCAT(mc.city) as cities
+		FROM metropolitan_areas m
+		LEFT JOIN metropolitan_cities mc ON m.id = mc.metropolitan_area_id
+		WHERE m.name = ?
+		GROUP BY m.id, m.name
+	`, name).Scan(&area.ID, &area.Name, &citiesStr)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query metropolitan area: %v", err)
+	}
+
+	if citiesStr.Valid && citiesStr.String != "" {
+		area.Cities = strings.Split(citiesStr.String, ",")
+	} else {
+		area.Cities = []string{}
+	}
+
+	return &area, nil
+}
+
+// UpdateMetropolitanArea updates or creates a metropolitan area
+func (d *Database) UpdateMetropolitanArea(area models.MetropolitanArea) error {
+	// Start a transaction
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Check if the area exists by name
+	var existingID int64
+	err = tx.QueryRow("SELECT id FROM metropolitan_areas WHERE name = ?", area.Name).Scan(&existingID)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("failed to check existing metropolitan area: %v", err)
+	}
+
+	// Insert or update the metropolitan area
+	var id int64
+	if err == sql.ErrNoRows {
+		// Insert new area
+		result, err := tx.Exec("INSERT INTO metropolitan_areas (name) VALUES (?)", area.Name)
+		if err != nil {
+			return fmt.Errorf("failed to insert metropolitan area: %v", err)
+		}
+		id, err = result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get metropolitan area ID: %v", err)
+		}
+	} else {
+		// Update existing area
+		id = existingID
+	}
+
+	// Delete existing cities for this metropolitan area
+	_, err = tx.Exec("DELETE FROM metropolitan_cities WHERE metropolitan_area_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing cities: %v", err)
+	}
+
+	// Insert new cities
+	for _, city := range area.Cities {
+		_, err = tx.Exec(`
+			INSERT INTO metropolitan_cities (metropolitan_area_id, city)
+			VALUES (?, ?)
+		`, id, city)
+		if err != nil {
+			return fmt.Errorf("failed to insert city: %v", err)
+		}
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return nil
+}
+
+// DeleteMetropolitanArea deletes a metropolitan area and its cities
+func (d *Database) DeleteMetropolitanArea(name string) error {
+	result, err := d.db.Exec("DELETE FROM metropolitan_areas WHERE name = ?", name)
+	if err != nil {
+		return fmt.Errorf("failed to delete metropolitan area: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("metropolitan area not found: %s", name)
+	}
+
+	return nil
+}
+
+// GetCitiesInMetropolitanArea returns all cities in a metropolitan area
+func (d *Database) GetCitiesInMetropolitanArea(name string) ([]string, error) {
+	rows, err := d.db.Query(`
+		SELECT mc.city
+		FROM metropolitan_cities mc
+		JOIN metropolitan_areas ma ON mc.metropolitan_area_id = ma.id
+		WHERE ma.name = ?
+	`, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query cities: %v", err)
+	}
+	defer rows.Close()
+
+	var cities []string
+	for rows.Next() {
+		var city string
+		if err := rows.Scan(&city); err != nil {
+			return nil, fmt.Errorf("failed to scan city: %v", err)
+		}
+		cities = append(cities, city)
+	}
+
+	return cities, nil
+}
+
+func (d *Database) cityExists(city string) (bool, error) {
+	var exists bool
+	err := d.db.QueryRow("SELECT EXISTS(SELECT 1 FROM properties WHERE LOWER(city) = LOWER(?) LIMIT 1)", city).Scan(&exists)
+	return exists, err
 }

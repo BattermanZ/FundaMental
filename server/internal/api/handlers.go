@@ -63,7 +63,8 @@ func (h *Handler) GetAllProperties(c *gin.Context) {
 		h.logger.WithError(err).Error("Failed to parse date range")
 	}
 
-	properties, err := h.db.GetAllProperties(dateRange.StartDate, dateRange.EndDate)
+	city := c.Query("city")
+	properties, err := h.db.GetAllProperties(dateRange.StartDate, dateRange.EndDate, city)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get properties")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get properties"})
@@ -79,7 +80,8 @@ func (h *Handler) GetPropertyStats(c *gin.Context) {
 		h.logger.WithError(err).Error("Failed to parse date range")
 	}
 
-	stats, err := h.db.GetPropertyStats(dateRange.StartDate, dateRange.EndDate)
+	city := c.Query("city")
+	stats, err := h.db.GetPropertyStats(dateRange.StartDate, dateRange.EndDate, city)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get property stats")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get property stats"})
@@ -96,7 +98,8 @@ func (h *Handler) GetAreaStats(c *gin.Context) {
 		h.logger.WithError(err).Error("Failed to parse date range")
 	}
 
-	stats, err := h.db.GetAreaStats(postalPrefix, dateRange.StartDate, dateRange.EndDate)
+	city := c.Query("city")
+	stats, err := h.db.GetAreaStats(postalPrefix, dateRange.StartDate, dateRange.EndDate, city)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get area stats")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get area stats"})
@@ -118,7 +121,8 @@ func (h *Handler) GetRecentSales(c *gin.Context) {
 		h.logger.WithError(err).Error("Failed to parse date range")
 	}
 
-	sales, err := h.db.GetRecentSales(limit, dateRange.StartDate, dateRange.EndDate)
+	city := c.Query("city")
+	sales, err := h.db.GetRecentSales(limit, dateRange.StartDate, dateRange.EndDate, city)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get recent sales")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get recent sales"})

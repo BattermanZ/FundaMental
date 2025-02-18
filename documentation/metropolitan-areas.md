@@ -1,35 +1,44 @@
 # Metropolitan Areas Implementation
 
 ## Overview
-This document outlines a simple, user-defined approach for handling metropolitan areas in the property tracking system. The focus is on allowing users to define which cities belong to a metropolitan area (e.g., Amsterdam metropolitan area including Amstelveen and Diemen) through the frontend interface.
+This document outlines a simple, configuration-based approach for handling metropolitan areas in the property tracking system. The focus is on allowing users to define which cities belong to a metropolitan area (e.g., Amsterdam metropolitan area including Amstelveen and Diemen) through the frontend interface.
 
 ## Core Concept
-Instead of managing complex postal code ranges or geographic boundaries, we'll use a simple city-based grouping system where:
-- Users define metropolitan areas through the frontend
-- Cities can be added to or removed from metropolitan areas dynamically
-- Queries automatically include all cities in a metropolitan area when requested
+Instead of using database schemas or complex data structures, we'll use a simple JSON configuration file where:
+- Metropolitan areas are defined in a configuration file
+- Each metropolitan area is a simple list of constituent cities
+- No database changes or schemas are required
+- Configuration can be updated through the frontend
 
-## Data Structure
+## Configuration Structure
 
-### Simple Metropolitan Area Definition
-```go
-type MetropolitanArea struct {
-    Name     string   // e.g., "Amsterdam"
-    Cities   []string // e.g., ["Amsterdam", "Amstelveen", "Diemen"]
+### Simple Metropolitan Area Configuration
+```json
+{
+    "metropolitan_areas": [
+        {
+            "name": "Amsterdam Metro",
+            "cities": ["Amsterdam", "Amstelveen", "Diemen"]
+        },
+        {
+            "name": "Rotterdam Metro",
+            "cities": ["Rotterdam", "Schiedam", "Vlaardingen"]
+        }
+    ]
 }
 ```
 
 ## Implementation Strategy
 
-1. **Frontend Configuration**
-   - Add a metropolitan area management interface
-   - Allow users to:
-     - Create metropolitan areas
-     - Add/remove cities from metropolitan areas
-     - View current metropolitan area configurations
+1. **Configuration Management**
+   - Store metropolitan configurations in a JSON file
+   - Load configurations at runtime
+   - Save updates through file operations
+   - No database schema changes needed
 
 2. **Query Handling**
    - When querying for a metropolitan area:
+     - Read the configuration file
      - Include all properties from constituent cities
      - Maintain original city names in the database
      - Aggregate statistics across all included cities
