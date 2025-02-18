@@ -192,16 +192,18 @@ class FundaSpider(scrapy.Spider):
             self.logger.error(f"Blocked or verification required for URL: {response.url}")
             return
 
-        # Get current status from database
+        # Get current status from database (read-only operation)
         current_status = self.db.get_property_status(response.url)
         
-        # Initialize item with appropriate status
-        if current_status == 'inactive':
-            self.logger.info(f"Found republished listing: {response.url}")
-            item = FundaItem(url=response.url, status='republished')
-        else:
-            item = FundaItem(url=response.url, status='active')
+        # Initialize item with status 'active' by default
+        item = FundaItem(url=response.url, status='active')
         
+        # If the property was inactive, mark it for republishing
+        # The Go backend will handle the actual status change and republish count
+        if current_status == 'inactive':
+            self.logger.info(f"Found previously inactive listing: {response.url}")
+            item.status = 'active'  # We send as active, backend will handle republish logic
+
         # Extract address from the page content
         # Try multiple selectors for the address
         address_selectors = [
@@ -386,9 +388,12 @@ class FundaSpider(scrapy.Spider):
             except Exception as e:
                 self.logger.warning(f"Failed to parse listing date from text '{listing_date}': {e}")
 
+        # Add scraped timestamp
+        item.scraped_at = datetime.utcnow().isoformat()
+
         self.total_items_scraped += 1
         if self.total_items_scraped % 10 == 0:  # Log progress every 10 items
-            self.logger.info(f"Progress: Scraped {self.total_items_scraped} items from {self.page_count} pages")
+            self.logger.info(f"Progress: Scraped {self.total_items_scraped} items from {self.page_count}")
         
         self.logger.info(f"Successfully parsed {response.url}")
         self.logger.info(f"Extracted data: {item}")

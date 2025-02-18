@@ -154,8 +154,18 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 	}
 
 	// Format the message with property details
+	title := "<b>New Property Listed!</b>"
+	if property["status"] == "republished" {
+		republishCount := property["republish_count"].(int)
+		if republishCount > 1 {
+			title = fmt.Sprintf("<b>⚡ Property Republished! (%d times)</b>", republishCount)
+		} else {
+			title = "<b>⚡ Property Republished!</b>"
+		}
+	}
+
 	message := fmt.Sprintf(
-		"<b>New Property Listed!</b>\n\n"+
+		"%s\n\n"+
 			"🏠 %s\n"+
 			"�� %s, %s\n"+
 			"💰 €%d\n"+
@@ -165,6 +175,7 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 			"🏗️ Built: %v\n"+
 			"🚪 Rooms: %v\n\n"+
 			"🔗 <a href=\"%s\">View on Funda</a>",
+		title,
 		property["street"],
 		property["city"],
 		property["postal_code"],

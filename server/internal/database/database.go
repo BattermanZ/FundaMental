@@ -619,57 +619,136 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 	}
 	defer tx.Rollback()
 
-	// Prepare statement for checking existing properties
-	checkStmt, err := tx.Prepare("SELECT 1 FROM properties WHERE url = ?")
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare check statement: %w", err)
-	}
-	defer checkStmt.Close()
-
-	// Prepare statement for inserting properties
-	insertStmt, err := tx.Prepare(`
-		INSERT INTO properties 
-		(url, street, neighborhood, property_type, city, postal_code, price, year_built, 
-		 living_area, num_rooms, status, listing_date, selling_date, scraped_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare insert statement: %w", err)
-	}
-	defer insertStmt.Close()
-
 	var newProperties []map[string]interface{}
 
 	for _, prop := range properties {
-		// Check if property already exists
-		var exists bool
-		err = checkStmt.QueryRow(prop["url"]).Scan(&exists)
-		if err != sql.ErrNoRows {
-			continue // Property already exists
-		}
+		// Check if property exists and get its current state
+		var existingID int64
+		var currentStatus string
+		var republishCount int
+		err = tx.QueryRow(`
+			SELECT id, status, republish_count 
+			FROM properties 
+			WHERE url = ?
+		`, prop["url"]).Scan(&existingID, &currentStatus, &republishCount)
 
-		// Insert the property
-		_, err = insertStmt.Exec(
-			prop["url"],
-			prop["street"],
-			prop["neighborhood"],
-			prop["property_type"],
-			prop["city"],
-			prop["postal_code"],
-			prop["price"],
-			prop["year_built"],
-			prop["living_area"],
-			prop["num_rooms"],
-			prop["status"],
-			prop["listing_date"],
-			prop["selling_date"],
-			prop["scraped_at"],
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert property: %w", err)
-		}
+		if err == nil {
+			// Property exists, handle update
+			if currentStatus == "inactive" && prop["status"] == "active" {
+				// Property is being republished
+				republishCount++
+				prop["status"] = "republished"
+				prop["republish_count"] = republishCount
+			}
 
-		newProperties = append(newProperties, prop)
+			// Update the property
+			_, err = tx.Exec(`
+				UPDATE properties 
+				SET street = ?, 
+					neighborhood = ?,
+					property_type = ?,
+					city = ?,
+					postal_code = ?,
+					price = ?,
+					year_built = ?,
+					living_area = ?,
+					num_rooms = ?,
+					status = ?,
+					listing_date = ?,
+					selling_date = ?,
+					scraped_at = ?,
+					republish_count = ?
+				WHERE url = ?
+			`,
+				prop["street"],
+				prop["neighborhood"],
+				prop["property_type"],
+				prop["city"],
+				prop["postal_code"],
+				prop["price"],
+				prop["year_built"],
+				prop["living_area"],
+				prop["num_rooms"],
+				prop["status"],
+				prop["listing_date"],
+				prop["selling_date"],
+				prop["scraped_at"],
+				republishCount,
+				prop["url"],
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update property: %w", err)
+			}
+
+			// Record history
+			_, err = tx.Exec(`
+				INSERT INTO property_history 
+				(property_id, status, price, listing_date)
+				VALUES (?, ?, ?, ?)
+			`,
+				existingID,
+				prop["status"],
+				prop["price"],
+				prop["listing_date"],
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert property history: %w", err)
+			}
+
+		} else if err == sql.ErrNoRows {
+			// Insert new property
+			result, err := tx.Exec(`
+				INSERT INTO properties 
+				(url, street, neighborhood, property_type, city, postal_code, 
+				 price, year_built, living_area, num_rooms, status, 
+				 listing_date, selling_date, scraped_at, republish_count)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+				prop["url"],
+				prop["street"],
+				prop["neighborhood"],
+				prop["property_type"],
+				prop["city"],
+				prop["postal_code"],
+				prop["price"],
+				prop["year_built"],
+				prop["living_area"],
+				prop["num_rooms"],
+				prop["status"],
+				prop["listing_date"],
+				prop["selling_date"],
+				prop["scraped_at"],
+				0, // Initial republish_count
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert property: %w", err)
+			}
+
+			// Get the new property ID
+			propertyID, err := result.LastInsertId()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get last insert ID: %w", err)
+			}
+
+			// Record initial history
+			_, err = tx.Exec(`
+				INSERT INTO property_history 
+				(property_id, status, price, listing_date)
+				VALUES (?, ?, ?, ?)
+			`,
+				propertyID,
+				prop["status"],
+				prop["price"],
+				prop["listing_date"],
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert initial property history: %w", err)
+			}
+
+			newProperties = append(newProperties, prop)
+		} else {
+			return nil, fmt.Errorf("failed to check existing property: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
