@@ -10,7 +10,8 @@ import {
     Chip,
     Alert,
     FormControl,
-    FormHelperText
+    FormHelperText,
+    createFilterOptions
 } from '@mui/material';
 import { MetropolitanArea, MetropolitanAreaFormData } from '../types/metropolitan';
 import { api } from '../services/api';
@@ -20,6 +21,9 @@ interface MetropolitanAreaFormProps {
     onSubmit: () => void;
     onCancel: () => void;
 }
+
+// Create a filter that allows adding new options
+const filter = createFilterOptions<string>();
 
 const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSubmit, onCancel }) => {
     const [formData, setFormData] = useState<MetropolitanAreaFormData>({
@@ -70,6 +74,22 @@ const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSub
         }
     };
 
+    const handleCityChange = (_: any, newValue: (string | string[])[]) => {
+        // Handle both string and array inputs
+        const processedCities = newValue.map(option => {
+            if (typeof option === 'string') {
+                // For direct string inputs (freeSolo mode)
+                return option.trim();
+            }
+            return option;
+        }).filter(city => city.length > 0); // Filter out empty strings
+
+        setFormData({ ...formData, cities: processedCities as string[] });
+        if (error?.includes('city')) {
+            setError(null);
+        }
+    };
+
     const isCitiesError = error?.includes('city') || (formData.cities.length === 0);
 
     return (
@@ -90,13 +110,26 @@ const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSub
                     <FormControl error={isCitiesError} required fullWidth>
                         <Autocomplete
                             multiple
+                            freeSolo
+                            selectOnFocus
+                            clearOnBlur
+                            handleHomeEndKeys
                             options={availableCities}
                             value={formData.cities}
-                            onChange={(_, newValue) => {
-                                setFormData({ ...formData, cities: newValue });
-                                if (error?.includes('city')) {
-                                    setError(null);
+                            onChange={handleCityChange}
+                            filterOptions={(options, params) => {
+                                const filtered = filter(options, params);
+                                const { inputValue } = params;
+                                
+                                // Suggest creating a new value if it's not in the list
+                                const isExisting = options.some(
+                                    option => inputValue.toLowerCase() === option.toLowerCase()
+                                );
+                                if (inputValue !== '' && !isExisting) {
+                                    filtered.push(inputValue);
                                 }
+
+                                return filtered;
                             }}
                             renderTags={(value, getTagProps) =>
                                 value.map((option, index) => {
@@ -115,6 +148,7 @@ const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSub
                                 <TextField
                                     {...params}
                                     label="Cities"
+                                    placeholder="Type to add a city"
                                     error={isCitiesError}
                                     required
                                     inputProps={{
