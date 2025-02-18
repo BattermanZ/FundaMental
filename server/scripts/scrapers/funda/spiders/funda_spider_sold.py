@@ -244,7 +244,7 @@ class FundaSpiderSold(scrapy.Spider):
                     if data.get('@type') in ['Appartement', 'Product'] or (isinstance(data.get('@type'), list) and 'Appartement' in data['@type']):
                         if 'address' in data:
                             item.street = data['address'].get('streetAddress')
-                            item.city = data['address'].get('addressLocality')
+                            item.city = self.place.capitalize()
                             item.postal_code = data['address'].get('postalCode')
                         if 'offers' in data and 'price' in data['offers']:
                             item.price = data['offers']['price']

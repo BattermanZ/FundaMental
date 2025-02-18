@@ -66,7 +66,7 @@ func (dm *DistrictManager) GetUniqueDistricts() (map[string]string, error) {
 			city
 		FROM properties 
 		WHERE postal_code IS NOT NULL
-		  AND substr(postal_code, 1, 4) BETWEEN '1000' AND '1999'  -- Ensure valid Amsterdam postal codes
+		  AND postal_code REGEXP '^[0-9]{4}'  -- Ensure valid postal code format (4 digits)
 	`
 
 	rows, err := dm.db.Query(query)

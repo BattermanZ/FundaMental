@@ -170,7 +170,7 @@ class FundaSpider(scrapy.Spider):
                     meta={'dont_cache': True}
                 )
             else:
-                # Fallback to manual page construction if next button not found
+                # Fallback to manual page construction if the next button is not found
                 self.page_count += 1
                 next_page_params = self.base_params.copy()
                 next_page_params['page'] = self.page_count
