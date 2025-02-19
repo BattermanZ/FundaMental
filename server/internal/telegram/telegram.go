@@ -59,7 +59,7 @@ func (s *Service) getPriceAnalysis(price, livingArea float64, postalCode string)
 
 	// Format the analysis message
 	var analysis strings.Builder
-	analysis.WriteString("<u>📊 District Analysis</u>\n")
+	analysis.WriteString("📊 <u>District Analysis</u>\n")
 
 	// Compare with active listings
 	if activeMedian > 0 {
