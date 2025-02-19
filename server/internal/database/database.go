@@ -1145,3 +1145,24 @@ func (d *Database) GetDistrictPriceAnalysis(district string) (activeMedian float
 
 	return activeMedian, activeCount, soldMedian, soldCount, nil
 }
+
+// GetPreviousPrice returns the previous price for a property
+func (d *Database) GetPreviousPrice(propertyID int64) (int, error) {
+	var previousPrice int
+	err := d.db.QueryRow(`
+		SELECT price
+		FROM property_history
+		WHERE property_id = ?
+		ORDER BY listing_date DESC
+		LIMIT 1 OFFSET 1
+	`, propertyID).Scan(&previousPrice)
+
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to get previous price: %v", err)
+	}
+
+	return previousPrice, nil
+}

@@ -219,25 +219,24 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		postalCode = "Unknown"
 	}
 
-	var pricePerSqm string
 	var priceAnalysis string
 
 	// Only attempt price analysis if we have a valid database connection and valid data
 	if s.db != nil && price > 0 && livingArea > 0 && postalCode != "Unknown" {
 		var err error
-		pricePerSqm, priceAnalysis, err = s.getPriceAnalysis(price, livingArea, postalCode)
+		_, priceAnalysis, err = s.getPriceAnalysis(price, livingArea, postalCode)
 		if err != nil {
 			s.logger.WithError(err).Error("Failed to get price analysis")
-			pricePerSqm = "N/A"
 			priceAnalysis = "N/A"
 		}
 	} else {
-		pricePerSqm = fmt.Sprintf("€%.0f/m²", price/livingArea)
 		priceAnalysis = "N/A (price analysis unavailable)"
 	}
 
 	// Format the message with property details
 	title := "<b>New Property Listed!</b>"
+	var priceText string
+
 	if property["status"] == "republished" {
 		var republishCount int
 		switch rc := property["republish_count"].(type) {
@@ -254,6 +253,31 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		} else {
 			title = "<b>⚡ Property Republished!</b>"
 		}
+
+		// Get previous price if available
+		if id, ok := property["id"].(int64); ok && s.db != nil {
+			if previousPrice, err := s.db.GetPreviousPrice(id); err == nil && previousPrice > 0 {
+				priceDiff := price - float64(previousPrice)
+				priceDiffPercent := (priceDiff / float64(previousPrice)) * 100
+				var arrow string
+				if priceDiff > 0 {
+					arrow = "📈"
+				} else {
+					arrow = "📉"
+				}
+				priceText = fmt.Sprintf("💰 €%s (%s %+.1f%% from €%s)",
+					formatNumber(price),
+					arrow,
+					priceDiffPercent,
+					formatNumber(float64(previousPrice)))
+			} else {
+				priceText = fmt.Sprintf("💰 €%s", formatNumber(price))
+			}
+		} else {
+			priceText = fmt.Sprintf("💰 €%s", formatNumber(price))
+		}
+	} else {
+		priceText = fmt.Sprintf("💰 €%s", formatNumber(price))
 	}
 
 	// Safely handle year_built and num_rooms
@@ -285,7 +309,7 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		"%s\n\n"+
 			"🏠 %s\n"+
 			"📍 %s, %s\n"+
-			"💰 €%s\n"+
+			"%s\n"+
 			"📐 %v m²\n"+
 			"%s\n"+
 			"🏗️ Built: %v\n"+
@@ -295,7 +319,7 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		street,
 		city,
 		postalCode,
-		formatNumber(price),
+		priceText,
 		livingArea,
 		priceAnalysis,
 		yearBuilt,

@@ -306,20 +306,22 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 	}
 
 	// Create a test service with the stored configuration
-	testService := telegram.NewService(h.logger)
+	testService := h.telegramService
 	testService.UpdateConfig(config)
-	testService.SetDatabase(h.db)
 
 	// Create a sample property for testing
 	sampleProperty := map[string]interface{}{
-		"street":      "Test Street 123",
-		"city":        "Amsterdam",
-		"postal_code": "1012 AB", // Real Amsterdam postal code for better test
-		"price":       450000,
-		"year_built":  2020,
-		"living_area": 85,
-		"num_rooms":   3,
-		"url":         "https://example.com/test-property",
+		"id":              int64(1), // Add ID for republish test
+		"street":          "Test Street 123",
+		"city":            "Amsterdam",
+		"postal_code":     "1012 AB", // Real Amsterdam postal code for better test
+		"price":           450000,
+		"year_built":      2020,
+		"living_area":     85,
+		"num_rooms":       3,
+		"url":             "https://example.com/test-property",
+		"status":          "republished",
+		"republish_count": 2,
 	}
 
 	// Send test notification
