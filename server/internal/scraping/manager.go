@@ -59,6 +59,7 @@ func NewSpiderManager(db *database.Database, logger *logrus.Logger) *SpiderManag
 
 	// Initialize telegram service
 	telegramService := telegram.NewService(logger)
+	telegramService.SetDatabase(db)
 
 	return &SpiderManager{
 		logger:          logger,

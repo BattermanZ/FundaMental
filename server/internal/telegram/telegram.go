@@ -9,6 +9,7 @@ import (
 	"fundamental/server/internal/models"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -51,27 +52,74 @@ func (s *Service) getPriceAnalysis(price, livingArea float64, postalCode string)
 	pricePerSqm := price / livingArea
 	district := postalCode[:4]
 
-	medianPrice, err := s.db.GetDistrictMedianPricePerSqm(district)
+	activeMedian, activeCount, soldMedian, soldCount, err := s.db.GetDistrictPriceAnalysis(district)
 	if err != nil {
-		return fmt.Sprintf("€%.0f/m²", pricePerSqm), "District comparison unavailable", err
+		return fmt.Sprintf("€%s/m²", formatNumber(pricePerSqm)), "District comparison unavailable", err
 	}
 
-	if medianPrice <= 0 {
-		return fmt.Sprintf("€%.0f/m²", pricePerSqm), "No recent sales in district", nil
+	// Format the analysis message
+	var analysis strings.Builder
+	analysis.WriteString("📊 District Analysis:\n")
+
+	// Compare with active listings
+	if activeMedian > 0 {
+		ratio := pricePerSqm / activeMedian
+		var rating string
+		switch {
+		case ratio <= 0.80:
+			rating = "<b>GREAT</b>"
+		case ratio <= 0.95:
+			rating = "<b>GOOD</b>"
+		case ratio <= 1.05:
+			rating = "<b>NORMAL</b>"
+		case ratio <= 1.20:
+			rating = "<b>BAD</b>"
+		default:
+			rating = "<b>HORRIBLE</b>"
+		}
+		diff := ((ratio - 1) * 100)
+		analysis.WriteString(fmt.Sprintf("Current listings (%d): %s (%+.1f%% vs. median)\n", activeCount, rating, diff))
+	} else {
+		analysis.WriteString("Current listings (0): No active listings for comparison\n")
 	}
 
-	priceDiff := ((pricePerSqm - medianPrice) / medianPrice) * 100
-	var analysis string
-	switch {
-	case priceDiff <= -10:
-		analysis = fmt.Sprintf("%.1f%% below district median (€%.0f/m²)", -priceDiff, medianPrice)
-	case priceDiff >= 10:
-		analysis = fmt.Sprintf("%.1f%% above district median (€%.0f/m²)", priceDiff, medianPrice)
-	default:
-		analysis = fmt.Sprintf("Close to district median (€%.0f/m²)", medianPrice)
+	// Compare with sold properties
+	if soldMedian > 0 {
+		ratio := pricePerSqm / soldMedian
+		var rating string
+		switch {
+		case ratio <= 0.80:
+			rating = "<b>GREAT</b>"
+		case ratio <= 0.95:
+			rating = "<b>GOOD</b>"
+		case ratio <= 1.05:
+			rating = "<b>NORMAL</b>"
+		case ratio <= 1.20:
+			rating = "<b>BAD</b>"
+		default:
+			rating = "<b>HORRIBLE</b>"
+		}
+		diff := ((ratio - 1) * 100)
+		analysis.WriteString(fmt.Sprintf("Past year sales (%d): %s (%+.1f%% vs. median)", soldCount, rating, diff))
+	} else {
+		analysis.WriteString("Past year sales (0): No recent sales for comparison")
 	}
 
-	return fmt.Sprintf("€%.0f/m²", pricePerSqm), analysis, nil
+	return fmt.Sprintf("€%s/m²", formatNumber(pricePerSqm)), analysis.String(), nil
+}
+
+// formatNumber adds thousand separators to a number
+func formatNumber(num float64) string {
+	parts := strings.Split(fmt.Sprintf("%.0f", num), ".")
+	intPart := parts[0]
+	var result []byte
+	for i, j := len(intPart)-1, 0; i >= 0; i, j = i-1, j+1 {
+		if j > 0 && j%3 == 0 {
+			result = append([]byte{','}, result...)
+		}
+		result = append([]byte{intPart[i]}, result...)
+	}
+	return string(result)
 }
 
 // SendMessage sends a message to the configured Telegram chat
@@ -237,10 +285,9 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		"%s\n\n"+
 			"🏠 %s\n"+
 			"📍 %s, %s\n"+
-			"💰 €%d\n"+
+			"💰 €%s\n"+
 			"📐 %v m²\n"+
-			"💵 %s\n"+
-			"📊 %s\n"+
+			"%s\n"+
 			"🏗️ Built: %v\n"+
 			"🚪 Rooms: %v\n\n"+
 			"🔗 <a href=\"%s\">View on Funda</a>",
@@ -248,9 +295,8 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		street,
 		city,
 		postalCode,
-		int(price),
+		formatNumber(price),
 		livingArea,
-		pricePerSqm,
 		priceAnalysis,
 		yearBuilt,
 		numRooms,

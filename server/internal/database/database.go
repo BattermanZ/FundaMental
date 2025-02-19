@@ -1091,3 +1091,57 @@ func (d *Database) MarkInactiveProperties(city string, activeURLs []string) erro
 
 	return nil
 }
+
+// GetDistrictPriceAnalysis returns median prices and counts for both active and sold properties
+func (d *Database) GetDistrictPriceAnalysis(district string) (activeMedian float64, activeCount int, soldMedian float64, soldCount int, err error) {
+	// Get active listings median and count
+	err = d.db.QueryRow(`
+		WITH price_per_sqm AS (
+			SELECT price / living_area as price_sqm
+			FROM properties
+			WHERE substr(postal_code, 1, 4) = ?
+			AND status = 'active'
+			AND price > 0 AND living_area > 0
+		)
+		SELECT 
+			COALESCE(AVG(price_sqm), 0) as median,
+			COUNT(*) as count
+		FROM (
+			SELECT price_sqm,
+				   ROW_NUMBER() OVER (ORDER BY price_sqm) as row_num,
+				   COUNT(*) OVER () as total_count
+			FROM price_per_sqm
+		) ranked
+		WHERE row_num IN ((total_count + 1)/2, (total_count + 2)/2)
+	`, district).Scan(&activeMedian, &activeCount)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+
+	// Get sold properties median and count (last 12 months)
+	err = d.db.QueryRow(`
+		WITH price_per_sqm AS (
+			SELECT price / living_area as price_sqm
+			FROM properties
+			WHERE substr(postal_code, 1, 4) = ?
+			AND status = 'sold'
+			AND price > 0 AND living_area > 0
+			AND selling_date >= date('now', '-12 months')
+		)
+		SELECT 
+			COALESCE(AVG(price_sqm), 0) as median,
+			COUNT(*) as count
+		FROM (
+			SELECT price_sqm,
+				   ROW_NUMBER() OVER (ORDER BY price_sqm) as row_num,
+				   COUNT(*) OVER () as total_count
+			FROM price_per_sqm
+		) ranked
+		WHERE row_num IN ((total_count + 1)/2, (total_count + 2)/2)
+	`, district).Scan(&soldMedian, &soldCount)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+
+	return activeMedian, activeCount, soldMedian, soldCount, nil
+}
