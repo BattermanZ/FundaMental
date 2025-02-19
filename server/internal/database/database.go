@@ -417,6 +417,15 @@ func (d *Database) RunMigrations() error {
 		return fmt.Errorf("failed to create metropolitan_cities table: %v", err)
 	}
 
+	// Add republish_count column if it doesn't exist
+	_, err = d.db.Exec(`
+		ALTER TABLE properties 
+		ADD COLUMN republish_count INTEGER DEFAULT 0;
+	`)
+	if err != nil && err.Error() != "duplicate column name: republish_count" {
+		return fmt.Errorf("failed to add republish_count column: %v", err)
+	}
+
 	// Add latitude and longitude columns if they don't exist
 	_, err = d.db.Exec(`
 		ALTER TABLE properties 

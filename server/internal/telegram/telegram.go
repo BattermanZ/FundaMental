@@ -39,42 +39,39 @@ func (s *Service) SetDatabase(db *database.Database) {
 }
 
 // getPriceAnalysis returns the price analysis for a property
-func (s *Service) getPriceAnalysis(price float64, livingArea float64, postalCode string) (string, string, error) {
-	if livingArea <= 0 || price <= 0 {
-		return "", "", fmt.Errorf("invalid price or living area")
+func (s *Service) getPriceAnalysis(price, livingArea float64, postalCode string) (string, string, error) {
+	if s.db == nil {
+		return "", "", errors.New("database connection not initialized")
+	}
+
+	if livingArea <= 0 {
+		return "", "", errors.New("invalid living area")
 	}
 
 	pricePerSqm := price / livingArea
 	district := postalCode[:4]
 
-	medianPricePerSqm, err := s.db.GetDistrictMedianPricePerSqm(district)
+	medianPrice, err := s.db.GetDistrictMedianPricePerSqm(district)
 	if err != nil {
-		return "", "", err
+		return fmt.Sprintf("€%.0f/m²", pricePerSqm), "District comparison unavailable", err
 	}
 
-	if medianPricePerSqm <= 0 {
-		return fmt.Sprintf("€%.0f/m²", pricePerSqm), "NO DATA", nil
+	if medianPrice <= 0 {
+		return fmt.Sprintf("€%.0f/m²", pricePerSqm), "No recent sales in district", nil
 	}
 
-	percentageDiff := ((pricePerSqm - medianPricePerSqm) / medianPricePerSqm) * 100
-
-	var rating string
+	priceDiff := ((pricePerSqm - medianPrice) / medianPrice) * 100
+	var analysis string
 	switch {
-	case percentageDiff < -20:
-		rating = "GREAT"
-	case percentageDiff < -5:
-		rating = "GOOD"
-	case percentageDiff < 5:
-		rating = "NORMAL"
-	case percentageDiff < 20:
-		rating = "BAD"
+	case priceDiff <= -10:
+		analysis = fmt.Sprintf("%.1f%% below district median (€%.0f/m²)", -priceDiff, medianPrice)
+	case priceDiff >= 10:
+		analysis = fmt.Sprintf("%.1f%% above district median (€%.0f/m²)", priceDiff, medianPrice)
 	default:
-		rating = "HORRIBLE"
+		analysis = fmt.Sprintf("Close to district median (€%.0f/m²)", medianPrice)
 	}
 
-	return fmt.Sprintf("€%.0f/m²", pricePerSqm),
-		fmt.Sprintf("%s (%+.1f%% vs. district median)", rating, percentageDiff),
-		nil
+	return fmt.Sprintf("€%.0f/m²", pricePerSqm), analysis, nil
 }
 
 // SendMessage sends a message to the configured Telegram chat
@@ -142,21 +139,68 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		return errors.New("Telegram chat ID is not configured")
 	}
 
-	price := float64(property["price"].(int))
-	livingArea := float64(property["living_area"].(int))
-	postalCode := property["postal_code"].(string)
+	// Safely convert numeric values
+	var price float64
+	var livingArea float64
 
-	pricePerSqm, priceAnalysis, err := s.getPriceAnalysis(price, livingArea, postalCode)
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to get price analysis")
-		pricePerSqm = "N/A"
-		priceAnalysis = "N/A"
+	// Handle price conversion
+	switch p := property["price"].(type) {
+	case int:
+		price = float64(p)
+	case float64:
+		price = p
+	default:
+		s.logger.WithField("price", property["price"]).Error("Invalid price type")
+		price = 0
+	}
+
+	// Handle living area conversion
+	switch la := property["living_area"].(type) {
+	case int:
+		livingArea = float64(la)
+	case float64:
+		livingArea = la
+	default:
+		s.logger.WithField("living_area", property["living_area"]).Error("Invalid living area type")
+		livingArea = 0
+	}
+
+	postalCode, ok := property["postal_code"].(string)
+	if !ok {
+		s.logger.Error("Invalid or missing postal code")
+		postalCode = "Unknown"
+	}
+
+	var pricePerSqm string
+	var priceAnalysis string
+
+	// Only attempt price analysis if we have a valid database connection and valid data
+	if s.db != nil && price > 0 && livingArea > 0 && postalCode != "Unknown" {
+		var err error
+		pricePerSqm, priceAnalysis, err = s.getPriceAnalysis(price, livingArea, postalCode)
+		if err != nil {
+			s.logger.WithError(err).Error("Failed to get price analysis")
+			pricePerSqm = "N/A"
+			priceAnalysis = "N/A"
+		}
+	} else {
+		pricePerSqm = fmt.Sprintf("€%.0f/m²", price/livingArea)
+		priceAnalysis = "N/A (price analysis unavailable)"
 	}
 
 	// Format the message with property details
 	title := "<b>New Property Listed!</b>"
 	if property["status"] == "republished" {
-		republishCount := property["republish_count"].(int)
+		var republishCount int
+		switch rc := property["republish_count"].(type) {
+		case int:
+			republishCount = rc
+		case float64:
+			republishCount = int(rc)
+		default:
+			republishCount = 1
+		}
+
 		if republishCount > 1 {
 			title = fmt.Sprintf("<b>⚡ Property Republished! (%d times)</b>", republishCount)
 		} else {
@@ -164,10 +208,35 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		}
 	}
 
+	// Safely handle year_built and num_rooms
+	var yearBuilt interface{} = "N/A"
+	if yb := property["year_built"]; yb != nil {
+		switch v := yb.(type) {
+		case int:
+			yearBuilt = v
+		case float64:
+			yearBuilt = int(v)
+		}
+	}
+
+	var numRooms interface{} = "N/A"
+	if nr := property["num_rooms"]; nr != nil {
+		switch v := nr.(type) {
+		case int:
+			numRooms = v
+		case float64:
+			numRooms = int(v)
+		}
+	}
+
+	street, _ := property["street"].(string)
+	city, _ := property["city"].(string)
+	url, _ := property["url"].(string)
+
 	message := fmt.Sprintf(
 		"%s\n\n"+
 			"🏠 %s\n"+
-			"�� %s, %s\n"+
+			"📍 %s, %s\n"+
 			"💰 €%d\n"+
 			"📐 %v m²\n"+
 			"💵 %s\n"+
@@ -176,16 +245,16 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 			"🚪 Rooms: %v\n\n"+
 			"🔗 <a href=\"%s\">View on Funda</a>",
 		title,
-		property["street"],
-		property["city"],
-		property["postal_code"],
-		property["price"],
-		property["living_area"],
+		street,
+		city,
+		postalCode,
+		int(price),
+		livingArea,
 		pricePerSqm,
 		priceAnalysis,
-		property["year_built"],
-		property["num_rooms"],
-		property["url"],
+		yearBuilt,
+		numRooms,
+		url,
 	)
 
 	return s.SendMessage(message)
