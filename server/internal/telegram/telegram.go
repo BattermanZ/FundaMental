@@ -59,7 +59,7 @@ func (s *Service) getPriceAnalysis(price, livingArea float64, postalCode string)
 
 	// Format the analysis message
 	var analysis strings.Builder
-	analysis.WriteString("📊 District Analysis:\n")
+	analysis.WriteString("<u>📊 District Analysis</u>\n")
 
 	// Compare with active listings
 	if activeMedian > 0 {
@@ -78,9 +78,9 @@ func (s *Service) getPriceAnalysis(price, livingArea float64, postalCode string)
 			rating = "<b>HORRIBLE</b>"
 		}
 		diff := ((ratio - 1) * 100)
-		analysis.WriteString(fmt.Sprintf("Current listings (%d): %s (%+.1f%% vs. median)\n", activeCount, rating, diff))
+		analysis.WriteString(fmt.Sprintf("Current listings (%d properties):\n%s (%+.1f%% vs. median)\n\n", activeCount, rating, diff))
 	} else {
-		analysis.WriteString("Current listings (0): No active listings for comparison\n")
+		analysis.WriteString("Current listings (0 properties):\nNo active listings for comparison\n\n")
 	}
 
 	// Compare with sold properties
@@ -100,9 +100,9 @@ func (s *Service) getPriceAnalysis(price, livingArea float64, postalCode string)
 			rating = "<b>HORRIBLE</b>"
 		}
 		diff := ((ratio - 1) * 100)
-		analysis.WriteString(fmt.Sprintf("Past year sales (%d): %s (%+.1f%% vs. median)", soldCount, rating, diff))
+		analysis.WriteString(fmt.Sprintf("Past year sales (%d properties):\n%s (%+.1f%% vs. median)", soldCount, rating, diff))
 	} else {
-		analysis.WriteString("Past year sales (0): No recent sales for comparison")
+		analysis.WriteString("Past year sales (0 properties):\nNo recent sales for comparison")
 	}
 
 	return fmt.Sprintf("€%s/m²", formatNumber(pricePerSqm)), analysis.String(), nil
@@ -312,9 +312,9 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 			"%s\n"+
 			"📐 %v m²\n"+
 			"💵 €%s/m²\n"+
-			"%s\n"+
 			"🏗️ Built: %v\n"+
 			"🚪 Rooms: %v\n\n"+
+			"%s\n\n"+
 			"🔗 <a href=\"%s\">View on Funda</a>",
 		title,
 		street,
@@ -323,9 +323,9 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		priceText,
 		livingArea,
 		formatNumber(price/livingArea),
-		priceAnalysis,
 		yearBuilt,
 		numRooms,
+		priceAnalysis,
 		url,
 	)
 
