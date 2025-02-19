@@ -1097,50 +1097,90 @@ func (d *Database) GetDistrictPriceAnalysis(district string) (activeMedian float
 	// Get active listings median and count
 	err = d.db.QueryRow(`
 		WITH price_per_sqm AS (
-			SELECT price / living_area as price_sqm
+			SELECT 
+				price / living_area as price_sqm,
+				COUNT(*) OVER () as total_count
 			FROM properties
 			WHERE substr(postal_code, 1, 4) = ?
 			AND status = 'active'
 			AND price > 0 AND living_area > 0
+			-- Additional data quality checks
+			AND living_area BETWEEN 15 AND 1000  -- Reasonable size range
+			AND price BETWEEN 50000 AND 10000000  -- Reasonable price range
+		),
+		ranked AS (
+			SELECT 
+				price_sqm,
+				ROW_NUMBER() OVER (ORDER BY price_sqm) as row_num,
+				total_count
+			FROM price_per_sqm
 		)
 		SELECT 
-			COALESCE(AVG(price_sqm), 0) as median,
-			COUNT(*) as count
-		FROM (
-			SELECT price_sqm,
-				   ROW_NUMBER() OVER (ORDER BY price_sqm) as row_num,
-				   COUNT(*) OVER () as total_count
-			FROM price_per_sqm
-		) ranked
-		WHERE row_num IN ((total_count + 1)/2, (total_count + 2)/2)
+			COALESCE(
+				CASE 
+					WHEN total_count = 0 THEN 0
+					WHEN total_count % 2 = 0 THEN
+						-- Even number of rows: average of two middle values
+						(SELECT AVG(price_sqm) 
+						 FROM ranked 
+						 WHERE row_num IN ((total_count/2), (total_count/2) + 1))
+					ELSE
+						-- Odd number of rows: middle value
+						(SELECT price_sqm 
+						 FROM ranked 
+						 WHERE row_num = (total_count + 1)/2)
+				END, 0
+			) as median,
+			MAX(total_count) as count
+		FROM ranked
 	`, district).Scan(&activeMedian, &activeCount)
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return 0, 0, 0, 0, fmt.Errorf("failed to get active listings analysis: %v", err)
 	}
 
 	// Get sold properties median and count (last 12 months)
 	err = d.db.QueryRow(`
 		WITH price_per_sqm AS (
-			SELECT price / living_area as price_sqm
+			SELECT 
+				price / living_area as price_sqm,
+				COUNT(*) OVER () as total_count
 			FROM properties
 			WHERE substr(postal_code, 1, 4) = ?
 			AND status = 'sold'
 			AND price > 0 AND living_area > 0
+			-- Additional data quality checks
+			AND living_area BETWEEN 15 AND 1000  -- Reasonable size range
+			AND price BETWEEN 50000 AND 10000000  -- Reasonable price range
 			AND selling_date >= date('now', '-12 months')
+		),
+		ranked AS (
+			SELECT 
+				price_sqm,
+				ROW_NUMBER() OVER (ORDER BY price_sqm) as row_num,
+				total_count
+			FROM price_per_sqm
 		)
 		SELECT 
-			COALESCE(AVG(price_sqm), 0) as median,
-			COUNT(*) as count
-		FROM (
-			SELECT price_sqm,
-				   ROW_NUMBER() OVER (ORDER BY price_sqm) as row_num,
-				   COUNT(*) OVER () as total_count
-			FROM price_per_sqm
-		) ranked
-		WHERE row_num IN ((total_count + 1)/2, (total_count + 2)/2)
+			COALESCE(
+				CASE 
+					WHEN total_count = 0 THEN 0
+					WHEN total_count % 2 = 0 THEN
+						-- Even number of rows: average of two middle values
+						(SELECT AVG(price_sqm) 
+						 FROM ranked 
+						 WHERE row_num IN ((total_count/2), (total_count/2) + 1))
+					ELSE
+						-- Odd number of rows: middle value
+						(SELECT price_sqm 
+						 FROM ranked 
+						 WHERE row_num = (total_count + 1)/2)
+				END, 0
+			) as median,
+			MAX(total_count) as count
+		FROM ranked
 	`, district).Scan(&soldMedian, &soldCount)
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return 0, 0, 0, 0, fmt.Errorf("failed to get sold properties analysis: %v", err)
 	}
 
 	return activeMedian, activeCount, soldMedian, soldCount, nil

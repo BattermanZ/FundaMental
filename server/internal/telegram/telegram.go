@@ -311,6 +311,7 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 			"📍 %s, %s\n"+
 			"%s\n"+
 			"📐 %v m²\n"+
+			"💵 €%s/m²\n"+
 			"%s\n"+
 			"🏗️ Built: %v\n"+
 			"🚪 Rooms: %v\n\n"+
@@ -321,6 +322,7 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		postalCode,
 		priceText,
 		livingArea,
+		formatNumber(price/livingArea),
 		priceAnalysis,
 		yearBuilt,
 		numRooms,
