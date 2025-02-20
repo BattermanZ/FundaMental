@@ -7,6 +7,7 @@ from datetime import datetime
 import urllib.parse
 import os
 import pickle
+import logging
 
 class FundaSpider(scrapy.Spider):
     name = "funda_spider"
@@ -36,6 +37,9 @@ class FundaSpider(scrapy.Spider):
         self.total_items_scraped = 0
         self.new_items_found = 0
         self.active_urls = set()  # Track all active URLs for refresh operation
+        self.buffer = []
+        self.buffer_size = 100  # Configurable batch size
+        self.logger = logging.getLogger(__name__)
         
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
@@ -142,7 +146,7 @@ class FundaSpider(scrapy.Spider):
             self.processed_urls.add(url)
             yield scrapy.Request(
                 url,
-                callback=self.parse_house,
+                callback=self.parse_property,
                 headers=self.headers,
                 meta={'dont_cache': True}
             )
@@ -180,7 +184,18 @@ class FundaSpider(scrapy.Spider):
         else:
             self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
 
-    def parse_house(self, response):
+    def parse_property(self, response):
+        try:
+            property_item = self.extract_property_data(response)
+            self.buffer.append(property_item)
+            
+            if len(self.buffer) >= self.buffer_size:
+                yield from self.flush_buffer()
+                
+        except Exception as e:
+            self.logger.error(f"Error parsing property {response.url}: {str(e)}")
+            
+    def extract_property_data(self, response):
         # Check if we're being blocked
         if response.status == 403 or "Je bent bijna op de pagina die je zoekt" in response.text:
             self.logger.error(f"Blocked or verification required for URL: {response.url}")
@@ -511,6 +526,23 @@ class FundaSpider(scrapy.Spider):
             meta={'dont_cache': True}
         )
 
+    def flush_buffer(self):
+        """Flush the current buffer of properties."""
+        if not self.buffer:
+            return
+            
+        self.logger.info(f"Flushing buffer with {len(self.buffer)} properties")
+        properties_batch = self.buffer
+        self.buffer = []
+        
+        yield {
+            'type': 'properties_batch',
+            'items': properties_batch,
+            'timestamp': datetime.now().isoformat(),
+            'spider': self.name,
+            'city': self.place
+        }
+
     def closed(self, reason):
         """Called when the spider is closed."""
         self.logger.info(f"Spider closed: {reason}")
@@ -521,4 +553,9 @@ class FundaSpider(scrapy.Spider):
         self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}")
         
         # Save final state
-        self.save_state() 
+        self.save_state()
+        
+        # Ensure any remaining items in buffer are processed when spider closes
+        if self.buffer:
+            self.logger.info(f"Flushing remaining {len(self.buffer)} properties on spider close")
+            yield from self.flush_buffer() 
