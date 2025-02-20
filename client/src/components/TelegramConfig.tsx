@@ -9,8 +9,7 @@ import {
     Box,
     Alert,
     CircularProgress,
-    Link,
-    Divider
+    Link
 } from '@mui/material';
 import { api } from '../services/api';
 
