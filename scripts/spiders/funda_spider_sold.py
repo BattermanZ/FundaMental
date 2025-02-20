@@ -158,7 +158,7 @@ class FundaSpiderSold(scrapy.Spider):
             self.processed_urls.add(url)
             yield scrapy.Request(
                 url,
-                callback=self.parse_listing,
+                callback=self.parse_property,
                 headers=self.headers,
                 meta={'dont_cache': True}
             )
@@ -196,9 +196,7 @@ class FundaSpiderSold(scrapy.Spider):
         else:
             self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
 
-    def parse_listing(self, response):
-        self.logger.info(f"Parsing listing page: {response.url}")
-        
+    def parse_property(self, response):
         # Check if we're being blocked
         if response.status == 403 or "Je bent bijna op de pagina die je zoekt" in response.text:
             self.logger.error(f"Blocked or verification required for URL: {response.url}")
@@ -209,9 +207,22 @@ class FundaSpiderSold(scrapy.Spider):
             self.total_items_scraped += 1
             self.buffer.append(item)
             
+            # Log progress every 10 items
+            if self.total_items_scraped % 10 == 0:
+                self.logger.info(f"Scraped {self.total_items_scraped} properties. Buffer size: {len(self.buffer)}")
+            
             # If buffer is full, yield the batch
             if len(self.buffer) >= self.buffer_size:
-                yield from self.flush_buffer()
+                self.logger.info(f"Buffer full ({len(self.buffer)} items). Yielding batch...")
+                batch = {
+                    'type': 'properties_batch',
+                    'items': self.buffer.copy(),
+                    'timestamp': datetime.now().isoformat(),
+                    'spider': self.name,
+                    'city': self.place
+                }
+                self.buffer = []
+                yield batch
 
     def extract_property_data(self, response):
         item = FundaItem()
@@ -395,23 +406,6 @@ class FundaSpiderSold(scrapy.Spider):
         self.logger.info(f"Extracted item: {item}")
         return item
 
-    def flush_buffer(self):
-        """Flush the current buffer of properties."""
-        if not self.buffer:
-            return
-            
-        self.logger.info(f"Flushing buffer with {len(self.buffer)} properties")
-        properties_batch = self.buffer
-        self.buffer = []
-        
-        yield {
-            'type': 'properties_batch',
-            'items': properties_batch,
-            'timestamp': datetime.now().isoformat(),
-            'spider': self.name,
-            'city': self.place
-        }
-
     def closed(self, reason):
         """Called when the spider is closed."""
         self.logger.info(f"Spider closed: {reason}")
@@ -421,10 +415,18 @@ class FundaSpiderSold(scrapy.Spider):
         self.logger.info(f"Total items scraped: {self.total_items_scraped}")
         self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}")
         
-        # Flush any remaining items in buffer
+        # Save final state
+        self.save_state()
+        
+        # Ensure any remaining items in buffer are processed when spider closes
         if self.buffer:
             self.logger.info(f"Flushing remaining {len(self.buffer)} properties on spider close")
-            yield from self.flush_buffer()
-        
-        # Save final state
-        self.save_state() 
+            batch = {
+                'type': 'properties_batch',
+                'items': self.buffer.copy(),
+                'timestamp': datetime.now().isoformat(),
+                'spider': self.name,
+                'city': self.place
+            }
+            self.buffer = []
+            yield batch 

@@ -46,13 +46,14 @@ class FundaPipeline:
         self.retry_delay = 5  # seconds
 
     def process_item(self, item, spider):
-        if item.get('type') == 'properties_batch':
+        """Process either a batch of items or a single item."""
+        if isinstance(item, dict) and item.get('type') == 'properties_batch':
             return self.process_batch(item, spider)
         return self.process_single_item(item, spider)
 
     def process_batch(self, batch_item, spider):
         """Process a batch of properties."""
-        properties = batch_item['items']
+        properties = batch_item.get('items', [])
         if not properties:
             return batch_item
 
@@ -61,9 +62,9 @@ class FundaPipeline:
                 response = self.session.post(
                     f"{self.api_url}/api/properties/batch",
                     json={
-                        'properties': properties,
-                        'spider': spider.name,
-                        'city': batch_item['city']
+                        'properties': [dict(item) for item in properties],
+                        'spider': batch_item.get('spider', spider.name if spider else 'unknown'),
+                        'city': batch_item.get('city', spider.place if spider else 'unknown')
                     },
                     timeout=30
                 )
@@ -74,19 +75,30 @@ class FundaPipeline:
             except requests.exceptions.RequestException as e:
                 if attempt == self.retry_count - 1:
                     self.logger.error(f"Failed to process batch after {self.retry_count} attempts: {str(e)}")
-                    raise DropItem(f"Failed to process batch: {str(e)}")
+                    # On final failure, try processing items individually
+                    self.logger.info("Falling back to individual item processing")
+                    for item in properties:
+                        try:
+                            self.process_single_item(item, spider)
+                        except Exception as e:
+                            self.logger.error(f"Failed to process individual item: {str(e)}")
+                    return batch_item
                 
                 self.logger.warning(f"Batch processing attempt {attempt + 1} failed: {str(e)}")
                 time.sleep(self.retry_delay)
 
     def process_single_item(self, item, spider):
-        """Process a single property item (legacy support)."""
+        """Process a single property item."""
         for attempt in range(self.retry_count):
             try:
                 response = self.session.post(
                     f"{self.api_url}/api/properties",
-                    json=item,
-                    timeout=10
+                    json={
+                        'property': dict(item),
+                        'spider': spider.name if spider else 'unknown',
+                        'city': spider.place if spider else 'unknown'
+                    },
+                    timeout=30
                 )
                 response.raise_for_status()
                 return item
@@ -96,5 +108,5 @@ class FundaPipeline:
                     self.logger.error(f"Failed to process item after {self.retry_count} attempts: {str(e)}")
                     raise DropItem(f"Failed to process item: {str(e)}")
                 
-                self.logger.warning(f"Processing attempt {attempt + 1} failed: {str(e)}")
+                self.logger.warning(f"Item processing attempt {attempt + 1} failed: {str(e)}")
                 time.sleep(self.retry_delay) 
