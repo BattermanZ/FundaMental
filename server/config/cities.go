@@ -1,37 +1,78 @@
 package config
 
-// City represents a city configuration
+import (
+	"fundamental/server/internal/database"
+)
+
+// City represents a city configuration for the spider scheduler
 type City struct {
-	Name      string    `json:"name"`
-	Center    []float64 `json:"center"`
-	ZoomLevel int       `json:"zoom_level"`
+	Name      string
+	Center    []float64
+	ZoomLevel int
 }
 
-// SupportedCities is a list of cities supported by the application
-var SupportedCities = []City{
-	{
-		Name:      "amsterdam",
-		Center:    []float64{52.3676, 4.9041},
-		ZoomLevel: 13,
-	},
-	// Add more cities here as needed
-}
-
-// GetCityNames returns a list of supported city names
-func GetCityNames() []string {
-	names := make([]string, len(SupportedCities))
-	for i, city := range SupportedCities {
-		names[i] = city.Name
+// GetCityNames returns all cities from metropolitan areas
+func GetCityNames(db *database.Database) ([]string, error) {
+	areas, err := db.GetMetropolitanAreas()
+	if err != nil {
+		return nil, err
 	}
-	return names
-}
 
-// GetCityByName returns a city configuration by name
-func GetCityByName(name string) *City {
-	for _, city := range SupportedCities {
-		if city.Name == name {
-			return &city
+	uniqueCities := make(map[string]bool)
+	for _, area := range areas {
+		for _, city := range area.Cities {
+			uniqueCities[city] = true
 		}
 	}
-	return nil
+
+	cities := make([]string, 0, len(uniqueCities))
+	for city := range uniqueCities {
+		cities = append(cities, city)
+	}
+	return cities, nil
+}
+
+// GetCityConfig returns configuration for a specific city
+func GetCityConfig(db *database.Database, cityName string) (*City, error) {
+	// Try to find the city in metropolitan areas
+	areas, err := db.GetMetropolitanAreas()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, area := range areas {
+		for _, city := range area.Cities {
+			if city == cityName {
+				// Use metropolitan area configuration if available
+				if area.CenterLat != nil && area.CenterLng != nil {
+					return &City{
+						Name:      city,
+						Center:    []float64{*area.CenterLat, *area.CenterLng},
+						ZoomLevel: getZoomLevel(area.ZoomLevel),
+					}, nil
+				}
+			}
+		}
+	}
+
+	// Fallback to default configuration
+	return &City{
+		Name:      cityName,
+		Center:    getDefaultCenter(cityName),
+		ZoomLevel: 13,
+	}, nil
+}
+
+// Helper function to get zoom level with fallback
+func getZoomLevel(z *int) int {
+	if z != nil {
+		return *z
+	}
+	return 13 // Default zoom level
+}
+
+// Helper function to get default center coordinates
+func getDefaultCenter(cityName string) []float64 {
+	// Could be expanded to include default coordinates for major cities
+	return []float64{52.3676, 4.9041} // Amsterdam coordinates as default
 }

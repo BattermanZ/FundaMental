@@ -52,8 +52,12 @@ func main() {
 	// Initialize spider manager
 	spiderManager := scraping.NewSpiderManager(db, logger)
 
-	// Initialize scheduler with supported cities
-	scheduler := scheduler.NewScheduler(spiderManager, logger, config.GetCityNames())
+	// Initialize scheduler with cities from database
+	cityNames, err := config.GetCityNames(db)
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to get city names for scheduler")
+	}
+	scheduler := scheduler.NewScheduler(spiderManager, logger, cityNames)
 
 	// Start scheduler
 	scheduler.Start()
