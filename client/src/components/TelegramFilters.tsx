@@ -12,8 +12,16 @@ import {
     Grid,
     Chip,
     ToggleButton,
-    ToggleButtonGroup
+    ToggleButtonGroup,
+    IconButton,
+    Tooltip,
+    InputAdornment,
+    Divider
 } from '@mui/material';
+import TuneIcon from '@mui/icons-material/Tune';
+import AddIcon from '@mui/icons-material/Add';
+import SaveIcon from '@mui/icons-material/Save';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
 export default function TelegramFiltersComponent() {
     const [filters, setFilters] = useState<TelegramFilters>({
@@ -102,102 +110,143 @@ export default function TelegramFiltersComponent() {
     };
 
     return (
-        <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" sx={{ mb: 3 }}>Notification Filters</Typography>
+        <Paper elevation={2} sx={{ p: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                <TuneIcon sx={{ mr: 2, color: 'primary.main' }} />
+                <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center' }}>
+                    Notification Filters
+                    <Tooltip title="Set criteria for properties you want to be notified about" arrow>
+                        <IconButton size="small" sx={{ ml: 1 }}>
+                            <InfoOutlinedIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                </Typography>
+            </Box>
+
             <form onSubmit={handleSubmit}>
-                <Stack spacing={3}>
+                <Stack spacing={4}>
                     {/* Price Range */}
-                    <Grid container spacing={2}>
-                        <Grid item xs={12} sm={6}>
-                            <TextField
-                                type="number"
-                                label="Minimum Price (€)"
-                                value={filters.min_price ?? ''}
-                                onChange={e => handleNumberChange('min_price', e.target.value)}
-                                fullWidth
-                                placeholder="No minimum"
-                            />
+                    <Box>
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 500 }}>
+                            Price Range
+                        </Typography>
+                        <Grid container spacing={2}>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    type="number"
+                                    label="Minimum Price"
+                                    value={filters.min_price ?? ''}
+                                    onChange={e => handleNumberChange('min_price', e.target.value)}
+                                    fullWidth
+                                    placeholder="No minimum"
+                                    InputProps={{
+                                        startAdornment: <InputAdornment position="start">€</InputAdornment>,
+                                    }}
+                                />
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    type="number"
+                                    label="Maximum Price"
+                                    value={filters.max_price ?? ''}
+                                    onChange={e => handleNumberChange('max_price', e.target.value)}
+                                    fullWidth
+                                    placeholder="No maximum"
+                                    InputProps={{
+                                        startAdornment: <InputAdornment position="start">€</InputAdornment>,
+                                    }}
+                                />
+                            </Grid>
                         </Grid>
-                        <Grid item xs={12} sm={6}>
-                            <TextField
-                                type="number"
-                                label="Maximum Price (€)"
-                                value={filters.max_price ?? ''}
-                                onChange={e => handleNumberChange('max_price', e.target.value)}
-                                fullWidth
-                                placeholder="No maximum"
-                            />
-                        </Grid>
-                    </Grid>
+                    </Box>
 
                     {/* Living Area Range */}
-                    <Grid container spacing={2}>
-                        <Grid item xs={12} sm={6}>
-                            <TextField
-                                type="number"
-                                label="Minimum Living Area (m²)"
-                                value={filters.min_living_area ?? ''}
-                                onChange={e => handleNumberChange('min_living_area', e.target.value)}
-                                fullWidth
-                                placeholder="No minimum"
-                            />
+                    <Box>
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 500 }}>
+                            Living Area
+                        </Typography>
+                        <Grid container spacing={2}>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    type="number"
+                                    label="Minimum Area"
+                                    value={filters.min_living_area ?? ''}
+                                    onChange={e => handleNumberChange('min_living_area', e.target.value)}
+                                    fullWidth
+                                    placeholder="No minimum"
+                                    InputProps={{
+                                        endAdornment: <InputAdornment position="end">m²</InputAdornment>,
+                                    }}
+                                />
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    type="number"
+                                    label="Maximum Area"
+                                    value={filters.max_living_area ?? ''}
+                                    onChange={e => handleNumberChange('max_living_area', e.target.value)}
+                                    fullWidth
+                                    placeholder="No maximum"
+                                    InputProps={{
+                                        endAdornment: <InputAdornment position="end">m²</InputAdornment>,
+                                    }}
+                                />
+                            </Grid>
                         </Grid>
-                        <Grid item xs={12} sm={6}>
-                            <TextField
-                                type="number"
-                                label="Maximum Living Area (m²)"
-                                value={filters.max_living_area ?? ''}
-                                onChange={e => handleNumberChange('max_living_area', e.target.value)}
-                                fullWidth
-                                placeholder="No maximum"
-                            />
-                        </Grid>
-                    </Grid>
+                    </Box>
 
                     {/* Number of Rooms Range */}
-                    <Grid container spacing={2}>
-                        <Grid item xs={12} sm={6}>
-                            <TextField
-                                type="number"
-                                label="Minimum Rooms"
-                                value={filters.min_rooms ?? ''}
-                                onChange={e => handleNumberChange('min_rooms', e.target.value)}
-                                fullWidth
-                                placeholder="No minimum"
-                            />
+                    <Box>
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 500 }}>
+                            Number of Rooms
+                        </Typography>
+                        <Grid container spacing={2}>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    type="number"
+                                    label="Minimum Rooms"
+                                    value={filters.min_rooms ?? ''}
+                                    onChange={e => handleNumberChange('min_rooms', e.target.value)}
+                                    fullWidth
+                                    placeholder="No minimum"
+                                />
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                                <TextField
+                                    type="number"
+                                    label="Maximum Rooms"
+                                    value={filters.max_rooms ?? ''}
+                                    onChange={e => handleNumberChange('max_rooms', e.target.value)}
+                                    fullWidth
+                                    placeholder="No maximum"
+                                />
+                            </Grid>
                         </Grid>
-                        <Grid item xs={12} sm={6}>
-                            <TextField
-                                type="number"
-                                label="Maximum Rooms"
-                                value={filters.max_rooms ?? ''}
-                                onChange={e => handleNumberChange('max_rooms', e.target.value)}
-                                fullWidth
-                                placeholder="No maximum"
-                            />
-                        </Grid>
-                    </Grid>
+                    </Box>
 
                     {/* Districts */}
                     <Box>
-                        <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                            Districts (4-digit postal code prefix)
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 500 }}>
+                            Districts
                         </Typography>
-                        <Grid container spacing={2}>
+                        <Grid container spacing={2} alignItems="flex-start">
                             <Grid item xs>
                                 <TextField
                                     value={newDistrict}
                                     onChange={e => setNewDistrict(e.target.value)}
+                                    label="District Code"
                                     fullWidth
                                     placeholder="e.g., 1012"
                                     inputProps={{ maxLength: 4 }}
+                                    helperText="Enter 4-digit postal code prefix"
                                 />
                             </Grid>
                             <Grid item>
                                 <Button
                                     onClick={handleAddDistrict}
                                     variant="contained"
-                                    sx={{ height: '100%' }}
+                                    sx={{ mt: 1 }}
+                                    startIcon={<AddIcon />}
                                 >
                                     Add
                                 </Button>
@@ -210,6 +259,7 @@ export default function TelegramFiltersComponent() {
                                     label={district}
                                     onDelete={() => handleRemoveDistrict(district)}
                                     color="primary"
+                                    variant="outlined"
                                 />
                             ))}
                         </Box>
@@ -217,22 +267,24 @@ export default function TelegramFiltersComponent() {
 
                     {/* Energy Labels */}
                     <Box>
-                        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                        <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 500 }}>
                             Energy Labels
                         </Typography>
                         <ToggleButtonGroup
                             value={filters.energy_labels}
                             onChange={handleEnergyLabelChange}
                             aria-label="energy labels"
-                            size="small"
-                            color="primary"
-                            sx={{ flexWrap: 'wrap' }}
+                            sx={{ flexWrap: 'wrap', gap: 1 }}
                         >
                             {ENERGY_LABELS.map(label => (
                                 <ToggleButton
                                     key={label}
                                     value={label}
                                     aria-label={`energy label ${label}`}
+                                    sx={{
+                                        borderRadius: '16px !important',
+                                        px: 2,
+                                    }}
                                 >
                                     {label}
                                 </ToggleButton>
@@ -240,11 +292,15 @@ export default function TelegramFiltersComponent() {
                         </ToggleButtonGroup>
                     </Box>
 
+                    <Divider />
+
                     <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                         <Button
                             type="submit"
                             disabled={loading}
                             variant="contained"
+                            startIcon={<SaveIcon />}
+                            size="large"
                         >
                             {loading ? 'Saving...' : 'Save Filters'}
                         </Button>

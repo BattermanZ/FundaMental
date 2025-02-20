@@ -15,8 +15,16 @@ import {
     FormControl,
     InputLabel,
     OutlinedInput,
-    FormHelperText
+    FormHelperText,
+    Container,
+    Divider,
+    IconButton,
+    Tooltip
 } from '@mui/material';
+import TelegramIcon from '@mui/icons-material/Telegram';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import SendIcon from '@mui/icons-material/Send';
+import SaveIcon from '@mui/icons-material/Save';
 
 export default function TelegramConfiguration() {
     const [config, setConfig] = useState<TelegramConfig>({
@@ -74,25 +82,40 @@ export default function TelegramConfiguration() {
     };
 
     return (
-        <Box sx={{ maxWidth: '1200px', mx: 'auto', py: 4 }}>
-            <Typography variant="h4" gutterBottom>Notifications</Typography>
-            
-            {/* Bot Configuration */}
-            <Box sx={{ mb: 4 }}>
-                <Typography variant="h5" gutterBottom>Telegram Bot Configuration</Typography>
-                <form onSubmit={handleSubmit}>
-                    <Stack spacing={2}>
-                        <FormControlLabel
-                            control={
-                                <Switch
-                                    checked={config.is_enabled}
-                                    onChange={e => setConfig(prev => ({ ...prev, is_enabled: e.target.checked }))}
-                                />
-                            }
-                            label="Enable Notifications"
-                        />
+        <Container maxWidth="lg" sx={{ py: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+                <TelegramIcon sx={{ fontSize: 32, color: 'primary.main', mr: 2 }} />
+                <Typography variant="h4" component="h1">
+                    Notifications
+                </Typography>
+            </Box>
 
-                        <FormControl variant="outlined" fullWidth>
+            {/* Bot Configuration */}
+            <Paper elevation={2} sx={{ p: 4, mb: 4 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+                    <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                        Telegram Bot Configuration
+                        <Tooltip title="Configure your Telegram bot to receive property notifications" arrow>
+                            <IconButton size="small" sx={{ ml: 1 }}>
+                                <InfoOutlinedIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
+                    </Typography>
+                    <FormControlLabel
+                        control={
+                            <Switch
+                                checked={config.is_enabled}
+                                onChange={e => setConfig(prev => ({ ...prev, is_enabled: e.target.checked }))}
+                                color="primary"
+                            />
+                        }
+                        label={config.is_enabled ? "Notifications Enabled" : "Notifications Disabled"}
+                    />
+                </Box>
+
+                <form onSubmit={handleSubmit}>
+                    <Stack spacing={3}>
+                        <FormControl variant="outlined">
                             <InputLabel htmlFor="bot-token">Bot Token</InputLabel>
                             <OutlinedInput
                                 id="bot-token"
@@ -101,10 +124,14 @@ export default function TelegramConfiguration() {
                                 onChange={e => setConfig(prev => ({ ...prev, bot_token: e.target.value }))}
                                 label="Bot Token"
                                 placeholder="Enter your bot token from @BotFather"
+                                fullWidth
                             />
+                            <FormHelperText>
+                                Get your bot token from <a href="https://t.me/botfather" target="_blank" rel="noopener noreferrer" style={{ color: '#1976d2' }}>@BotFather</a>
+                            </FormHelperText>
                         </FormControl>
 
-                        <FormControl variant="outlined" fullWidth>
+                        <FormControl variant="outlined">
                             <InputLabel htmlFor="chat-id">Chat ID</InputLabel>
                             <OutlinedInput
                                 id="chat-id"
@@ -112,15 +139,19 @@ export default function TelegramConfiguration() {
                                 onChange={e => setConfig(prev => ({ ...prev, chat_id: e.target.value }))}
                                 label="Chat ID"
                                 placeholder="Enter your chat ID"
+                                fullWidth
                             />
+                            <FormHelperText>
+                                Your Telegram chat ID (e.g., -123456789)
+                            </FormHelperText>
                         </FormControl>
 
-                        <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2 }}>
                             <Button
                                 onClick={handleTest}
                                 disabled={testing || loading || !config.is_enabled}
                                 variant="outlined"
-                                size="small"
+                                startIcon={<SendIcon />}
                             >
                                 {testing ? 'Sending...' : 'Send Test Message'}
                             </Button>
@@ -128,17 +159,17 @@ export default function TelegramConfiguration() {
                                 type="submit"
                                 disabled={loading}
                                 variant="contained"
-                                size="small"
+                                startIcon={<SaveIcon />}
                             >
                                 {loading ? 'Saving...' : 'Save Configuration'}
                             </Button>
                         </Box>
                     </Stack>
                 </form>
-            </Box>
+            </Paper>
 
             {/* Notification Filters */}
             <TelegramFiltersComponent />
-        </Box>
+        </Container>
     );
 } 
