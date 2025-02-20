@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
 	"fundamental/server/internal/geometry"
@@ -305,10 +306,6 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 		return
 	}
 
-	// Create a test service with the stored configuration
-	testService := h.telegramService
-	testService.UpdateConfig(config)
-
 	// Create a sample property for testing
 	sampleProperty := map[string]interface{}{
 		"id":              int64(1), // Add ID for republish test
@@ -322,10 +319,20 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 		"url":             "https://example.com/test-property",
 		"status":          "republished",
 		"republish_count": 2,
+		"energy_label":    "A++",
 	}
 
+	// Create a mock district analysis service that doesn't use the database
+	mockService := telegram.NewService(h.logger)
+	mockService.UpdateConfig(config)
+
+	// Set the mock price analysis
+	sampleProperty["price_analysis"] = fmt.Sprintf("📊 <u>District Analysis</u>\n" +
+		"Current listings (15 properties):\n<b>GOOD</b> (-8.5%% vs. median)\n\n" +
+		"Past year sales (42 properties):\n<b>NORMAL</b> (+2.1%% vs. median)")
+
 	// Send test notification
-	if err := testService.NotifyNewProperty(sampleProperty); err != nil {
+	if err := mockService.NotifyNewProperty(sampleProperty); err != nil {
 		h.logger.WithError(err).Error("Failed to send test notification")
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

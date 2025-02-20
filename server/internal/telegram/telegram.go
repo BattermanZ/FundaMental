@@ -313,7 +313,8 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 			"📐 %v m²\n"+
 			"💵 €%s/m²\n"+
 			"🏗️ Built: %v\n"+
-			"🚪 Rooms: %v\n\n"+
+			"🚪 Rooms: %v\n"+
+			"⚡ Energy label: %v\n\n"+
 			"%s\n\n"+
 			"🔗 <a href=\"%s\">View on Funda</a>",
 		title,
@@ -325,6 +326,7 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		formatNumber(price/livingArea),
 		yearBuilt,
 		numRooms,
+		property["energy_label"],
 		priceAnalysis,
 		url,
 	)
