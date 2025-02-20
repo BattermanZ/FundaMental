@@ -1,8 +1,15 @@
 package config
 
 import (
-	"fundamental/server/internal/database"
+	"fundamental/server/internal/models"
+	"regexp"
+	"strings"
 )
+
+// DatabaseReader interface defines the methods needed for city configuration
+type DatabaseReader interface {
+	GetMetropolitanAreas() ([]models.MetropolitanArea, error)
+}
 
 // City represents a city configuration for the spider scheduler
 type City struct {
@@ -11,29 +18,57 @@ type City struct {
 	ZoomLevel int
 }
 
+var multipleSpacesRegex = regexp.MustCompile(`\s+`)
+
+// NormalizeCity ensures consistent city name formatting for Funda
+func NormalizeCity(city string) string {
+	// Convert to lowercase for comparison
+	normalized := strings.ToLower(city)
+
+	// Special case: 's-Hertogenbosch is referenced as den-bosch on Funda
+	if normalized == "'s-hertogenbosch" || normalized == "s-hertogenbosch" {
+		return "den-bosch"
+	}
+
+	// Replace multiple spaces with a single space
+	normalized = multipleSpacesRegex.ReplaceAllString(normalized, " ")
+
+	// Replace spaces with hyphens
+	normalized = strings.ReplaceAll(normalized, " ", "-")
+
+	// Remove any apostrophes
+	normalized = strings.ReplaceAll(normalized, "'", "")
+
+	return normalized
+}
+
 // GetCityNames returns all cities from metropolitan areas
-func GetCityNames(db *database.Database) ([]string, error) {
+func GetCityNames(db DatabaseReader) ([]string, error) {
 	areas, err := db.GetMetropolitanAreas()
 	if err != nil {
 		return nil, err
 	}
 
-	uniqueCities := make(map[string]bool)
+	uniqueCities := make(map[string]string) // map[normalized]original
 	for _, area := range areas {
 		for _, city := range area.Cities {
-			uniqueCities[city] = true
+			normalized := NormalizeCity(city)
+			uniqueCities[normalized] = city
 		}
 	}
 
 	cities := make([]string, 0, len(uniqueCities))
-	for city := range uniqueCities {
+	for _, city := range uniqueCities {
 		cities = append(cities, city)
 	}
 	return cities, nil
 }
 
 // GetCityConfig returns configuration for a specific city
-func GetCityConfig(db *database.Database, cityName string) (*City, error) {
+func GetCityConfig(db DatabaseReader, cityName string) (*City, error) {
+	// Normalize the input city name for comparison
+	normalizedInput := NormalizeCity(cityName)
+
 	// Try to find the city in metropolitan areas
 	areas, err := db.GetMetropolitanAreas()
 	if err != nil {
@@ -42,11 +77,11 @@ func GetCityConfig(db *database.Database, cityName string) (*City, error) {
 
 	for _, area := range areas {
 		for _, city := range area.Cities {
-			if city == cityName {
+			if NormalizeCity(city) == normalizedInput {
 				// Use metropolitan area configuration if available
 				if area.CenterLat != nil && area.CenterLng != nil {
 					return &City{
-						Name:      city,
+						Name:      city, // Use original city name
 						Center:    []float64{*area.CenterLat, *area.CenterLng},
 						ZoomLevel: getZoomLevel(area.ZoomLevel),
 					}, nil
@@ -57,7 +92,7 @@ func GetCityConfig(db *database.Database, cityName string) (*City, error) {
 
 	// Fallback to default configuration
 	return &City{
-		Name:      cityName,
+		Name:      cityName, // Use original input name
 		Center:    getDefaultCenter(cityName),
 		ZoomLevel: 13,
 	}, nil

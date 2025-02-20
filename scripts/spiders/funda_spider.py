@@ -29,13 +29,14 @@ class FundaSpider(scrapy.Spider):
     }
 
     def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.place = place
+        super(FundaSpider, self).__init__(*args, **kwargs)
+        self.place = place.lower()  # Ensure lowercase for consistency
+        self.original_city = kwargs.get('original_city', place)
         self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
-        self.processed_urls = set()
+        self.processed_urls = set()  # Track processed URLs in current run
         self.total_items_scraped = 0
-        self.new_items_found = 0
+        self.new_items_found = 0  # Track new items found
         self.active_urls = set()  # Track all active URLs for refresh operation
         self.buffer = []
         self.buffer_size = 100  # Configurable batch size
@@ -44,11 +45,14 @@ class FundaSpider(scrapy.Spider):
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
         os.makedirs(self.state_dir, exist_ok=True)
-        self.state_file = os.path.join(self.state_dir, f'funda_active_{place}_state.pkl')
+        self.state_file = os.path.join(self.state_dir, f'funda_active_{self.place}_state.pkl')
+        
+        # Log city information
+        self.logger.info(f"Spider initialized for city: {self.original_city} (normalized: {self.place})")
         
         # Base parameters for the search
         self.base_params = {
-            'selected_area': json.dumps([place]),
+            'selected_area': json.dumps([self.place]),
             'availability': json.dumps(['available']),
             'object_type': json.dumps(['house', 'apartment']),
             'sort': 'date_down'  # Most recent first
@@ -71,6 +75,9 @@ class FundaSpider(scrapy.Spider):
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"macOS"'
         }
+
+        self.state = {}
+        self.load_state()
 
     def save_state(self):
         """Save current spider state for resuming later."""

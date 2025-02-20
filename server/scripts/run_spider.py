@@ -53,7 +53,7 @@ def run_spider(spider_type, place='amsterdam', max_pages=None, resume=False):
     
     Args:
         spider_type: Either 'active' or 'sold'
-        place: City to scrape
+        place: City to scrape (will be normalized)
         max_pages: Maximum number of pages to scrape
         resume: Whether to resume from previous state (sold spider only)
     """
@@ -69,10 +69,12 @@ def run_spider(spider_type, place='amsterdam', max_pages=None, resume=False):
         if spider_type == 'active':
             process.crawl(FundaSpider, 
                         place=place,
+                        original_city=place,
                         max_pages=max_pages)
         elif spider_type == 'sold':
             process.crawl(FundaSpiderSold, 
                         place=place,
+                        original_city=place,
                         max_pages=max_pages,
                         resume=resume)
         else:

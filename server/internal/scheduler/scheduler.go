@@ -1,8 +1,13 @@
 package scheduler
 
 import (
+	"bufio"
+	"fmt"
+	"fundamental/server/config"
 	"fundamental/server/internal/scraping"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,20 +137,24 @@ func (s *Scheduler) executeScheduledJobs(t time.Time) {
 func (s *Scheduler) runActiveSpiders() {
 	s.logger.Info("Starting active spider run")
 	for _, city := range s.cities {
+		normalizedCity := config.NormalizeCity(city)
 		s.logger.WithFields(logrus.Fields{
-			"city":     city,
-			"job_type": JobTypeActive.String(),
+			"city":            city,
+			"normalized_city": normalizedCity,
+			"job_type":        JobTypeActive.String(),
 		}).Info("Starting spider job")
 
-		if err := s.spiderManager.RunActiveSpider(city, nil); err != nil {
+		if err := s.spiderManager.RunActiveSpider(normalizedCity, nil); err != nil {
 			s.logger.WithError(err).WithFields(logrus.Fields{
-				"city":     city,
-				"job_type": JobTypeActive.String(),
+				"city":            city,
+				"normalized_city": normalizedCity,
+				"job_type":        JobTypeActive.String(),
 			}).Error("Spider job failed")
 		} else {
 			s.logger.WithFields(logrus.Fields{
-				"city":     city,
-				"job_type": JobTypeActive.String(),
+				"city":            city,
+				"normalized_city": normalizedCity,
+				"job_type":        JobTypeActive.String(),
 			}).Info("Spider job completed successfully")
 		}
 	}
@@ -155,20 +164,24 @@ func (s *Scheduler) runActiveSpiders() {
 func (s *Scheduler) runSoldSpiders() {
 	s.logger.Info("Starting sold spider run")
 	for _, city := range s.cities {
+		normalizedCity := config.NormalizeCity(city)
 		s.logger.WithFields(logrus.Fields{
-			"city":     city,
-			"job_type": JobTypeSold.String(),
+			"city":            city,
+			"normalized_city": normalizedCity,
+			"job_type":        JobTypeSold.String(),
 		}).Info("Starting spider job")
 
-		if err := s.spiderManager.RunSoldSpider(city, nil, true); err != nil {
+		if err := s.spiderManager.RunSoldSpider(normalizedCity, nil, true); err != nil {
 			s.logger.WithError(err).WithFields(logrus.Fields{
-				"city":     city,
-				"job_type": JobTypeSold.String(),
+				"city":            city,
+				"normalized_city": normalizedCity,
+				"job_type":        JobTypeSold.String(),
 			}).Error("Spider job failed")
 		} else {
 			s.logger.WithFields(logrus.Fields{
-				"city":     city,
-				"job_type": JobTypeSold.String(),
+				"city":            city,
+				"normalized_city": normalizedCity,
+				"job_type":        JobTypeSold.String(),
 			}).Info("Spider job completed successfully")
 		}
 	}
@@ -224,22 +237,26 @@ func (s *Scheduler) checkAndRunRefreshSpiders(t time.Time) {
 	// Check each city's schedule
 	for city, slot := range citySchedule {
 		if t.Weekday() == slot.day && t.Hour() == slot.hour {
+			normalizedCity := config.NormalizeCity(city)
 			s.logger.WithFields(logrus.Fields{
-				"city":     city,
-				"job_type": JobTypeRefresh.String(),
-				"day":      slot.day,
-				"hour":     slot.hour,
+				"city":            city,
+				"normalized_city": normalizedCity,
+				"job_type":        JobTypeRefresh.String(),
+				"day":             slot.day,
+				"hour":            slot.hour,
 			}).Info("Starting spider job")
 
-			if err := s.spiderManager.RunRefreshSpider(city); err != nil {
+			if err := s.spiderManager.RunRefreshSpider(normalizedCity); err != nil {
 				s.logger.WithError(err).WithFields(logrus.Fields{
-					"city":     city,
-					"job_type": JobTypeRefresh.String(),
+					"city":            city,
+					"normalized_city": normalizedCity,
+					"job_type":        JobTypeRefresh.String(),
 				}).Error("Spider job failed")
 			} else {
 				s.logger.WithFields(logrus.Fields{
-					"city":     city,
-					"job_type": JobTypeRefresh.String(),
+					"city":            city,
+					"normalized_city": normalizedCity,
+					"job_type":        JobTypeRefresh.String(),
 				}).Info("Spider job completed successfully")
 			}
 		}
@@ -250,4 +267,49 @@ func (s *Scheduler) checkAndRunRefreshSpiders(t time.Time) {
 func (s *Scheduler) Stop() {
 	close(s.stopChan)
 	s.wg.Wait()
+}
+
+func (s *Scheduler) startSpiderForCity(city string) error {
+	normalizedCity := config.NormalizeCity(city)
+	s.logger.Infof("Starting spider for city: %s (normalized: %s)", city, normalizedCity)
+
+	// Create spider command with normalized city name
+	cmd := exec.Command("python3", "server/scripts/run_spider.py")
+	cmd.Stdin = strings.NewReader(fmt.Sprintf(`{"spider_type": "active", "place": "%s", "original_city": "%s"}`, normalizedCity, city))
+
+	// Set up pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %v", err)
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start spider: %v", err)
+	}
+
+	// Handle output in goroutines
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			s.logger.Info(scanner.Text())
+		}
+	}()
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			s.logger.Error(scanner.Text())
+		}
+	}()
+
+	// Wait for the command to complete
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("spider failed: %v", err)
+	}
+
+	return nil
 }
