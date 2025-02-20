@@ -33,7 +33,7 @@ const MetropolitanAreaList: React.FC = () => {
         try {
             setLoading(true);
             setError(null);
-            const data = await api.getMetroAreas();
+            const data = await api.getMetropolitanAreas();
             setAreas(data || []);
         } catch (error) {
             console.error('Failed to fetch metropolitan areas:', error);
@@ -56,7 +56,7 @@ const MetropolitanAreaList: React.FC = () => {
     const handleDelete = async (area: MetropolitanArea) => {
         if (window.confirm('Are you sure you want to delete this metropolitan area?')) {
             try {
-                await api.deleteMetroArea(area.name);
+                await api.deleteMetropolitanArea(area.name);
                 await fetchAreas();
             } catch (error) {
                 console.error('Failed to delete metropolitan area:', error);
@@ -74,7 +74,7 @@ const MetropolitanAreaList: React.FC = () => {
     const handleGeocodeArea = async (area: MetropolitanArea) => {
         try {
             setLoading(true);
-            await api.geocodeMetroArea(area.name);
+            await api.geocodeMetropolitanArea(area.name);
             await fetchAreas(); // Refresh the list to show updated coordinates
         } catch (error) {
             console.error('Failed to geocode metropolitan area:', error);

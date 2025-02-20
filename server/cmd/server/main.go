@@ -1,12 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"fundamental/server/config"
 	"fundamental/server/internal/api"
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
-	"fundamental/server/internal/models"
 	"fundamental/server/internal/scheduler"
 	"fundamental/server/internal/scraping"
 	"os"
@@ -101,28 +99,4 @@ func main() {
 	if err := router.Run(":" + port); err != nil {
 		logger.WithError(err).Fatal("Server failed to start")
 	}
-}
-
-// migrateMetropolitanAreas migrates metropolitan areas from JSON to the database
-func migrateMetropolitanAreas(db *database.Database, logger *logrus.Logger) error {
-	// Get areas from JSON config
-	areas := config.GetMetroAreas()
-
-	// Migrate each area to the database
-	for _, area := range areas {
-		// Convert to database model
-		dbArea := models.MetropolitanArea{
-			Name:   area.Name,
-			Cities: area.Cities,
-		}
-
-		// Save to database
-		if err := db.UpdateMetroArea(dbArea); err != nil {
-			return fmt.Errorf("failed to migrate area %s: %v", area.Name, err)
-		}
-
-		logger.Infof("Migrated metropolitan area: %s", area.Name)
-	}
-
-	return nil
 }

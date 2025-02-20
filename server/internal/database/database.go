@@ -865,8 +865,8 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 	return newProperties, nil
 }
 
-// GetMetroAreas returns all metropolitan areas with their coordinates
-func (d *Database) GetMetroAreas() ([]models.MetropolitanArea, error) {
+// GetMetropolitanAreas returns all metropolitan areas with their coordinates
+func (d *Database) GetMetropolitanAreas() ([]models.MetropolitanArea, error) {
 	rows, err := d.db.Query(`
 		SELECT m.id, m.name, m.center_lat, m.center_lng, m.zoom_level,
 		       GROUP_CONCAT(mc.city) as cities,
@@ -973,8 +973,8 @@ func (d *Database) UpdateCityCoordinates(areaID int64, city string, lat, lng flo
 	return d.CalculateMetropolitanCenter(areaID)
 }
 
-// GetMetroAreaByName returns a specific metropolitan area by name
-func (d *Database) GetMetroAreaByName(name string) (*models.MetropolitanArea, error) {
+// GetMetropolitanAreaByName returns a specific metropolitan area by name
+func (d *Database) GetMetropolitanAreaByName(name string) (*models.MetropolitanArea, error) {
 	var area models.MetropolitanArea
 	var citiesStr sql.NullString
 
@@ -1002,8 +1002,8 @@ func (d *Database) GetMetroAreaByName(name string) (*models.MetropolitanArea, er
 	return &area, nil
 }
 
-// UpdateMetroArea updates or creates a metropolitan area
-func (d *Database) UpdateMetroArea(area models.MetropolitanArea) error {
+// UpdateMetropolitanArea updates or creates a metropolitan area
+func (d *Database) UpdateMetropolitanArea(area models.MetropolitanArea) error {
 	// Start a transaction
 	tx, err := d.db.Begin()
 	if err != nil {
@@ -1071,8 +1071,8 @@ func (d *Database) UpdateMetroArea(area models.MetropolitanArea) error {
 	return nil
 }
 
-// DeleteMetroArea deletes a metropolitan area and its cities
-func (d *Database) DeleteMetroArea(name string) error {
+// DeleteMetropolitanArea deletes a metropolitan area and its cities
+func (d *Database) DeleteMetropolitanArea(name string) error {
 	result, err := d.db.Exec("DELETE FROM metropolitan_areas WHERE name = ?", name)
 	if err != nil {
 		return fmt.Errorf("failed to delete metropolitan area: %v", err)
@@ -1090,8 +1090,8 @@ func (d *Database) DeleteMetroArea(name string) error {
 	return nil
 }
 
-// GetCitiesInMetro returns all cities in a metropolitan area
-func (d *Database) GetCitiesInMetro(name string) ([]string, error) {
+// GetCitiesInMetropolitanArea returns all cities in a metropolitan area
+func (d *Database) GetCitiesInMetropolitanArea(name string) ([]string, error) {
 	rows, err := d.db.Query(`
 		SELECT mc.city
 		FROM metropolitan_cities mc

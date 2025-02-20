@@ -29,14 +29,14 @@ func SetupMetropolitanRoutes(router *gin.Engine, db *database.Database, geocoder
 	router.GET("/api/metropolitan", handler.ListMetropolitanAreas)
 	router.POST("/api/metropolitan", handler.CreateMetropolitanArea)
 	router.GET("/api/metropolitan/:name", handler.GetMetropolitanArea)
-	router.PUT("/api/metropolitan/:name", handler.UpdateMetroArea)
-	router.DELETE("/api/metropolitan/:name", handler.DeleteMetroArea)
+	router.PUT("/api/metropolitan/:name", handler.UpdateMetropolitanArea)
+	router.DELETE("/api/metropolitan/:name", handler.DeleteMetropolitanArea)
 	router.POST("/api/metropolitan/:name/geocode", handler.GeocodeMetropolitanArea)
 }
 
 // ListMetropolitanAreas returns all metropolitan areas
 func (h *MetropolitanHandler) ListMetropolitanAreas(c *gin.Context) {
-	areas, err := h.db.GetMetroAreas()
+	areas, err := h.db.GetMetropolitanAreas()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -47,7 +47,7 @@ func (h *MetropolitanHandler) ListMetropolitanAreas(c *gin.Context) {
 // GetMetropolitanArea returns a specific metropolitan area
 func (h *MetropolitanHandler) GetMetropolitanArea(c *gin.Context) {
 	name := c.Param("name")
-	area, err := h.db.GetMetroAreaByName(name)
+	area, err := h.db.GetMetropolitanAreaByName(name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -67,7 +67,7 @@ func (h *MetropolitanHandler) CreateMetropolitanArea(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.UpdateMetroArea(area); err != nil {
+	if err := h.db.UpdateMetropolitanArea(area); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -78,8 +78,8 @@ func (h *MetropolitanHandler) CreateMetropolitanArea(c *gin.Context) {
 	c.JSON(http.StatusCreated, area)
 }
 
-// UpdateMetroArea updates an existing metropolitan area
-func (h *MetropolitanHandler) UpdateMetroArea(c *gin.Context) {
+// UpdateMetropolitanArea updates an existing metropolitan area
+func (h *MetropolitanHandler) UpdateMetropolitanArea(c *gin.Context) {
 	name := c.Param("name")
 	var area models.MetropolitanArea
 	if err := c.ShouldBindJSON(&area); err != nil {
@@ -93,7 +93,7 @@ func (h *MetropolitanHandler) UpdateMetroArea(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.UpdateMetroArea(area); err != nil {
+	if err := h.db.UpdateMetropolitanArea(area); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -104,10 +104,10 @@ func (h *MetropolitanHandler) UpdateMetroArea(c *gin.Context) {
 	c.JSON(http.StatusOK, area)
 }
 
-// DeleteMetroArea deletes a metropolitan area
-func (h *MetropolitanHandler) DeleteMetroArea(c *gin.Context) {
+// DeleteMetropolitanArea deletes a metropolitan area
+func (h *MetropolitanHandler) DeleteMetropolitanArea(c *gin.Context) {
 	name := c.Param("name")
-	if err := h.db.DeleteMetroArea(name); err != nil {
+	if err := h.db.DeleteMetropolitanArea(name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -120,7 +120,7 @@ func (h *MetropolitanHandler) GeocodeMetropolitanArea(c *gin.Context) {
 	name := c.Param("name")
 
 	// Get the metropolitan area
-	area, err := h.db.GetMetroAreaByName(name)
+	area, err := h.db.GetMetropolitanAreaByName(name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get metropolitan area"})
 		return
@@ -150,7 +150,7 @@ func (h *MetropolitanHandler) GeocodeMetropolitanArea(c *gin.Context) {
 	}
 
 	// Get the updated metropolitan area
-	updatedArea, err := h.db.GetMetroAreaByName(name)
+	updatedArea, err := h.db.GetMetropolitanAreaByName(name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get updated metropolitan area"})
 		return

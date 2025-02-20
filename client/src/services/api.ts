@@ -62,22 +62,22 @@ export const api = {
     },
 
     // Metropolitan Area endpoints
-    getMetroAreas: async (): Promise<MetropolitanArea[]> => {
+    getMetropolitanAreas: async (): Promise<MetropolitanArea[]> => {
         const response = await axiosInstance.get('/metropolitan');
         return response.data;
     },
 
-    getMetroArea: async (name: string): Promise<MetropolitanArea> => {
+    getMetropolitanArea: async (name: string): Promise<MetropolitanArea> => {
         const response = await axiosInstance.get(`/metropolitan/${name}`);
         return response.data;
     },
 
-    createMetroArea: async (data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
+    createMetropolitanArea: async (data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
         const response = await axiosInstance.post('/metropolitan', data);
         return response.data;
     },
 
-    updateMetroArea: async (name: string, data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
+    updateMetropolitanArea: async (name: string, data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
         const response = await axiosInstance.put(`/metropolitan/${name}`, {
             ...data,
             name // Ensure name in body matches URL
@@ -85,12 +85,12 @@ export const api = {
         return response.data;
     },
 
-    deleteMetroArea: async (name: string): Promise<void> => {
+    deleteMetropolitanArea: async (name: string): Promise<void> => {
         await axiosInstance.delete(`/metropolitan/${name}`);
     },
 
     // Geocode a metropolitan area's cities
-    geocodeMetroArea: async (name: string): Promise<MetropolitanArea> => {
+    geocodeMetropolitanArea: async (name: string): Promise<MetropolitanArea> => {
         const response = await axiosInstance.post(`/metropolitan/${name}/geocode`);
         return response.data;
     },

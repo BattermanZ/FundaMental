@@ -70,9 +70,9 @@ const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSub
 
         try {
             if (area) {
-                await api.updateMetroArea(area.name, formData);
+                await api.updateMetropolitanArea(area.name, formData);
             } else {
-                await api.createMetroArea(formData);
+                await api.createMetropolitanArea(formData);
             }
             onSubmit();
         } catch (error: any) {
