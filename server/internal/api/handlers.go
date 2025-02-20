@@ -377,13 +377,13 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 		"street":          "Test Street 123",
 		"city":            "Amsterdam",
 		"postal_code":     "1012 AB",
-		"price":           450000,
-		"year_built":      2020,
-		"living_area":     85,
-		"num_rooms":       3,
+		"price":           float64(450000),
+		"year_built":      float64(2020),
+		"living_area":     float64(85),
+		"num_rooms":       float64(3),
 		"url":             "https://example.com/test-property",
 		"status":          "republished",
-		"republish_count": 2,
+		"republish_count": float64(2),
 		"energy_label":    "A++",
 	}
 
