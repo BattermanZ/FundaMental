@@ -21,6 +21,7 @@ type Property struct {
 	CreatedAt    time.Time `json:"created_at"`
 	Latitude     *float64  `json:"latitude"`
 	Longitude    *float64  `json:"longitude"`
+	EnergyLabel  string    `json:"energy_label"`
 }
 
 type PropertyStats struct {

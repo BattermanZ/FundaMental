@@ -50,7 +50,8 @@ func (d *Database) GetAllProperties(startDate, endDate string, city string) ([]m
             COALESCE(scraped_at, CURRENT_TIMESTAMP) as scraped_at,
             COALESCE(created_at, CURRENT_TIMESTAMP) as created_at,
             latitude,
-            longitude
+            longitude,
+            energy_label
         FROM properties
         WHERE (
             -- For active properties, check effective_date (listing_date or scraped_at)
@@ -92,6 +93,7 @@ func (d *Database) GetAllProperties(startDate, endDate string, city string) ([]m
 		var yearBuilt, livingArea, numRooms sql.NullInt64
 		var price sql.NullInt64
 		var latitude, longitude sql.NullFloat64
+		var energyLabel sql.NullString
 
 		err := rows.Scan(
 			&p.ID,
@@ -112,6 +114,7 @@ func (d *Database) GetAllProperties(startDate, endDate string, city string) ([]m
 			&createdAt,
 			&latitude,
 			&longitude,
+			&energyLabel,
 		)
 		if err != nil {
 			return nil, err
@@ -162,6 +165,11 @@ func (d *Database) GetAllProperties(startDate, endDate string, city string) ([]m
 		if longitude.Valid {
 			lon := longitude.Float64
 			p.Longitude = &lon
+		}
+
+		// Handle energy_label
+		if energyLabel.Valid {
+			p.EnergyLabel = energyLabel.String
 		}
 
 		// Parse dates if they're valid
@@ -472,6 +480,15 @@ func (d *Database) RunMigrations() error {
 		return err
 	}
 
+	// Add energy_label column if it doesn't exist
+	_, err = d.db.Exec(`
+		ALTER TABLE properties 
+		ADD COLUMN energy_label TEXT;
+	`)
+	if err != nil && err.Error() != "duplicate column name: energy_label" {
+		return fmt.Errorf("failed to add energy_label column: %v", err)
+	}
+
 	return nil
 }
 
@@ -666,7 +683,8 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 					listing_date = ?,
 					selling_date = ?,
 					scraped_at = ?,
-					republish_count = ?
+					republish_count = ?,
+					energy_label = ?
 				WHERE url = ?
 			`,
 				prop["street"],
@@ -683,6 +701,7 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 				prop["selling_date"],
 				prop["scraped_at"],
 				republishCount,
+				prop["energy_label"],
 				prop["url"],
 			)
 			if err != nil {
@@ -710,8 +729,8 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 				INSERT INTO properties 
 				(url, street, neighborhood, property_type, city, postal_code, 
 				 price, year_built, living_area, num_rooms, status, 
-				 listing_date, selling_date, scraped_at, republish_count)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 listing_date, selling_date, scraped_at, republish_count, energy_label)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 				prop["url"],
 				prop["street"],
@@ -728,6 +747,7 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 				prop["selling_date"],
 				prop["scraped_at"],
 				0, // Initial republish_count
+				prop["energy_label"],
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to insert property: %w", err)

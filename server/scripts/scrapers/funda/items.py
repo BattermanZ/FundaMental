@@ -20,6 +20,7 @@ class FundaItem:
     status: Optional[str] = None
     listing_date: Optional[str] = None
     selling_date: Optional[str] = None
+    energy_label: Optional[str] = None  # Energy label (A++, A+, A, B, C, D, E, F, G)
     scraped_at: str = datetime.now().isoformat()
 
     def to_dict(self) -> dict:

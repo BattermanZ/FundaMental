@@ -204,6 +204,59 @@ class FundaSpider(scrapy.Spider):
             self.logger.info(f"Found previously inactive listing: {response.url}")
             item.status = 'active'  # We send as active, backend will handle republish logic
 
+        # Extract energy label using documented approach
+        energy_label_selectors = [
+            'dt:contains("Energielabel") + dd span::text',  # New format with span
+            'dt:contains("Energielabel") + dd div span::text',  # Alternative format
+            'dt:contains("Energielabel") + dd::text',  # Old format
+            'span[data-test-id="energy-label"]::text',
+            'span[class*="energy-label"]::text'
+        ]
+        
+        # Try HTML selectors first
+        for selector in energy_label_selectors:
+            energy_label = response.css(selector).get()
+            if energy_label:
+                clean_label = energy_label.strip().upper()
+                if re.match(r'^[A-G](\+{1,2})?$', clean_label):
+                    item.energy_label = clean_label
+                    self.logger.info(f"Found energy label with selector '{selector}': {item.energy_label}")
+                    break
+        
+        # Find all JSON-LD scripts
+        json_ld_scripts = response.css('script[type="application/ld+json"]::text').getall()
+        self.logger.info(f"Found {len(json_ld_scripts)} JSON-LD scripts")
+
+        # If energy label not found in HTML, try JSON-LD
+        if not item.energy_label:
+            try:
+                for script in json_ld_scripts:
+                    data = json.loads(script)
+                    if isinstance(data, dict):
+                        if 'EnergyData' in str(data) or 'energyLabel' in str(data):
+                            energy_match = re.search(r'["\']energy(?:Label|Data)["\']\s*:\s*["\']([A-G]\+*)["\']', script, re.IGNORECASE)
+                            if energy_match:
+                                item.energy_label = energy_match.group(1).upper()
+                                self.logger.info(f"Found energy label in JSON-LD: {item.energy_label}")
+                                break
+            except (json.JSONDecodeError, AttributeError) as e:
+                self.logger.warning(f"Failed to extract energy label from JSON-LD: {e}")
+
+        # If still not found, try description text
+        if not item.energy_label:
+            description = response.css('div.object-description__features li::text, div.object-description-body *::text').getall()
+            for text in description:
+                text = text.strip().lower()
+                if 'energielabel' in text or 'energieklasse' in text:
+                    label_match = re.search(r'energi(?:elabel|eklasse)\s*([a-g](?:\+{1,2})?)', text)
+                    if label_match:
+                        item.energy_label = label_match.group(1).upper()
+                        self.logger.info(f"Found energy label in description: {item.energy_label}")
+                        break
+
+        if not item.energy_label:
+            self.logger.warning("Could not find energy label")
+
         # Extract address from the page content
         # Try multiple selectors for the address
         address_selectors = [
