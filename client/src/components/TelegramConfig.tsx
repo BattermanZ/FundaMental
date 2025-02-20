@@ -1,205 +1,144 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { TelegramConfig } from '../types/telegram';
+import { getTelegramConfig, updateTelegramConfig, testTelegramConfig } from '../api/telegram';
+import { toast } from 'react-hot-toast';
+import TelegramFiltersComponent from './TelegramFilters';
 import {
-    Paper,
+    Box,
     Typography,
-    TextField,
+    Paper,
     Switch,
     FormControlLabel,
+    TextField,
     Button,
-    Box,
-    Alert,
-    CircularProgress,
-    Link
+    Stack,
+    FormControl,
+    InputLabel,
+    OutlinedInput,
+    FormHelperText
 } from '@mui/material';
-import { api } from '../services/api';
 
-interface TelegramConfigData {
-    bot_token: string;
-    chat_id: string;
-    is_enabled: boolean;
-}
-
-const TelegramConfig: React.FC = () => {
-    const [config, setConfig] = useState<TelegramConfigData>({
+export default function TelegramConfiguration() {
+    const [config, setConfig] = useState<TelegramConfig>({
+        is_enabled: false,
         bot_token: '',
         chat_id: '',
-        is_enabled: false,
     });
-    const [originalToken, setOriginalToken] = useState<string>('');
-    const [hasTokenChanged, setHasTokenChanged] = useState(false);
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
+    const [loading, setLoading] = useState(false);
     const [testing, setTesting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState<string | null>(null);
 
     useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                const data = await api.getTelegramConfig();
-                setConfig(data);
-                setOriginalToken(data.bot_token);
-                setLoading(false);
-            } catch (err) {
-                setError('Failed to load Telegram configuration');
-                setLoading(false);
-            }
-        };
-        fetchConfig();
+        loadConfig();
     }, []);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setSaving(true);
-        setError(null);
-        setSuccess(null);
-
+    const loadConfig = async () => {
         try {
-            // Only send the bot token if it has been changed
-            const updateData = {
-                ...config,
-                bot_token: hasTokenChanged ? config.bot_token : originalToken
-            };
-            await api.updateTelegramConfig(updateData);
-            setSuccess('Telegram configuration updated successfully');
-            
-            // After successful update, refresh the config
-            const newData = await api.getTelegramConfig();
-            setConfig(newData);
-            setOriginalToken(newData.bot_token);
-            setHasTokenChanged(false);
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to update Telegram configuration');
-        } finally {
-            setSaving(false);
+            const data = await getTelegramConfig();
+            setConfig(data);
+        } catch (error) {
+            toast.error('Failed to load configuration');
         }
     };
 
-    const handleTestNotification = async () => {
-        setTesting(true);
-        setError(null);
-        setSuccess(null);
-
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
         try {
-            await api.testTelegramConfig();
-            setSuccess('Test notification sent successfully! Check your Telegram.');
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to send test notification');
+            await updateTelegramConfig(config);
+            toast.success('Configuration updated successfully');
+        } catch (error) {
+            if (error instanceof Error) {
+                toast.error(error.message);
+            } else {
+                toast.error('Failed to update configuration');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleTest = async () => {
+        setTesting(true);
+        try {
+            await testTelegramConfig();
+            toast.success('Test message sent successfully');
+        } catch (error) {
+            if (error instanceof Error) {
+                toast.error(error.message);
+            } else {
+                toast.error('Failed to send test message');
+            }
         } finally {
             setTesting(false);
         }
     };
 
-    const handleTokenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newToken = e.target.value;
-        setConfig({ ...config, bot_token: newToken });
-        setHasTokenChanged(true);
-    };
-
-    if (loading) {
-        return <CircularProgress />;
-    }
-
-    const isConfigured = Boolean(originalToken || (hasTokenChanged && config.bot_token)) && config.chat_id;
-
     return (
-        <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-                Telegram Notifications
-            </Typography>
+        <Box sx={{ maxWidth: '1200px', mx: 'auto', py: 4 }}>
+            <Typography variant="h4" gutterBottom>Notifications</Typography>
             
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-                Configure Telegram notifications for new properties. Follow these steps:
-            </Typography>
-            <Box sx={{ mb: 2 }}>
-                <ol>
-                    <li>
-                        Create a new bot using{' '}
-                        <Link href="https://t.me/BotFather" target="_blank" rel="noopener">
-                            @BotFather
-                        </Link>
-                    </li>
-                    <li>Copy the bot token provided by BotFather</li>
-                    <li>
-                        Start a chat with your bot or add it to a group where you want to receive notifications
-                    </li>
-                    <li>
-                        Get your chat ID using{' '}
-                        <Link href="https://t.me/userinfobot" target="_blank" rel="noopener">
-                            @userinfobot
-                        </Link>
-                    </li>
-                </ol>
+            {/* Bot Configuration */}
+            <Box sx={{ mb: 4 }}>
+                <Typography variant="h5" gutterBottom>Telegram Bot Configuration</Typography>
+                <form onSubmit={handleSubmit}>
+                    <Stack spacing={2}>
+                        <FormControlLabel
+                            control={
+                                <Switch
+                                    checked={config.is_enabled}
+                                    onChange={e => setConfig(prev => ({ ...prev, is_enabled: e.target.checked }))}
+                                />
+                            }
+                            label="Enable Notifications"
+                        />
+
+                        <FormControl variant="outlined" fullWidth>
+                            <InputLabel htmlFor="bot-token">Bot Token</InputLabel>
+                            <OutlinedInput
+                                id="bot-token"
+                                type="password"
+                                value={config.bot_token}
+                                onChange={e => setConfig(prev => ({ ...prev, bot_token: e.target.value }))}
+                                label="Bot Token"
+                                placeholder="Enter your bot token from @BotFather"
+                            />
+                        </FormControl>
+
+                        <FormControl variant="outlined" fullWidth>
+                            <InputLabel htmlFor="chat-id">Chat ID</InputLabel>
+                            <OutlinedInput
+                                id="chat-id"
+                                value={config.chat_id}
+                                onChange={e => setConfig(prev => ({ ...prev, chat_id: e.target.value }))}
+                                label="Chat ID"
+                                placeholder="Enter your chat ID"
+                            />
+                        </FormControl>
+
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Button
+                                onClick={handleTest}
+                                disabled={testing || loading || !config.is_enabled}
+                                variant="outlined"
+                                size="small"
+                            >
+                                {testing ? 'Sending...' : 'Send Test Message'}
+                            </Button>
+                            <Button
+                                type="submit"
+                                disabled={loading}
+                                variant="contained"
+                                size="small"
+                            >
+                                {loading ? 'Saving...' : 'Save Configuration'}
+                            </Button>
+                        </Box>
+                    </Stack>
+                </form>
             </Box>
 
-            <form onSubmit={handleSubmit}>
-                <TextField
-                    fullWidth
-                    label="Bot Token"
-                    value={config.bot_token}
-                    onChange={handleTokenChange}
-                    margin="normal"
-                    required
-                    type="password"
-                    placeholder={hasTokenChanged ? '' : 'Enter new token or leave unchanged'}
-                />
-
-                <TextField
-                    fullWidth
-                    label="Chat ID"
-                    value={config.chat_id}
-                    onChange={(e) => setConfig({ ...config, chat_id: e.target.value })}
-                    margin="normal"
-                    required
-                    helperText="Your Telegram user ID or group chat ID"
-                />
-
-                <Box sx={{ mt: 2, mb: 2 }}>
-                    <FormControlLabel
-                        control={
-                            <Switch
-                                checked={config.is_enabled}
-                                onChange={(e) => setConfig({ ...config, is_enabled: e.target.checked })}
-                            />
-                        }
-                        label="Enable Notifications"
-                    />
-                </Box>
-
-                {error && (
-                    <Alert severity="error" sx={{ mb: 2 }}>
-                        {error}
-                    </Alert>
-                )}
-
-                {success && (
-                    <Alert severity="success" sx={{ mb: 2 }}>
-                        {success}
-                    </Alert>
-                )}
-
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Button
-                        variant="contained"
-                        color="primary"
-                        type="submit"
-                        disabled={saving}
-                    >
-                        {saving ? <CircularProgress size={24} /> : 'Save Configuration'}
-                    </Button>
-
-                    <Button
-                        variant="outlined"
-                        color="secondary"
-                        onClick={handleTestNotification}
-                        disabled={testing || !isConfigured}
-                    >
-                        {testing ? <CircularProgress size={24} /> : 'Send Test Notification'}
-                    </Button>
-                </Box>
-            </form>
-        </Paper>
+            {/* Notification Filters */}
+            <TelegramFiltersComponent />
+        </Box>
     );
-};
-
-export default TelegramConfig; 
+} 

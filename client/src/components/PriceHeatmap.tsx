@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, GeoJSON, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Property } from '../types/property';
 import * as d3 from 'd3';

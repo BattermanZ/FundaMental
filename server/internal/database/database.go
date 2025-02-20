@@ -489,6 +489,37 @@ func (d *Database) RunMigrations() error {
 		return fmt.Errorf("failed to add energy_label column: %v", err)
 	}
 
+	// Create telegram_filters table
+	_, err = d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS telegram_filters (
+			min_price INTEGER,
+			max_price INTEGER,
+			min_living_area INTEGER,
+			max_living_area INTEGER,
+			min_rooms INTEGER,
+			max_rooms INTEGER,
+			districts TEXT,
+			energy_labels TEXT
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create telegram_filters table: %v", err)
+	}
+
+	// Ensure we have exactly one row in telegram_filters
+	var count int
+	err = d.db.QueryRow("SELECT COUNT(*) FROM telegram_filters").Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to count telegram_filters: %v", err)
+	}
+
+	if count == 0 {
+		_, err = d.db.Exec("INSERT INTO telegram_filters DEFAULT VALUES")
+		if err != nil {
+			return fmt.Errorf("failed to insert default telegram_filters: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1225,4 +1256,72 @@ func (d *Database) GetPreviousPrice(propertyID int64) (int, error) {
 	}
 
 	return previousPrice, nil
+}
+
+// GetTelegramFilters retrieves the current telegram notification filters
+func (d *Database) GetTelegramFilters() (*models.TelegramFilters, error) {
+	filters := &models.TelegramFilters{}
+	var districts, energyLabels sql.NullString
+
+	err := d.db.QueryRow(`
+		SELECT 
+			min_price, max_price,
+			min_living_area, max_living_area,
+			min_rooms, max_rooms,
+			districts, energy_labels
+		FROM telegram_filters LIMIT 1
+	`).Scan(
+		&filters.MinPrice, &filters.MaxPrice,
+		&filters.MinLivingArea, &filters.MaxLivingArea,
+		&filters.MinRooms, &filters.MaxRooms,
+		&districts, &energyLabels,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get telegram filters: %v", err)
+	}
+
+	// Convert string arrays from database
+	if districts.Valid && districts.String != "" {
+		filters.Districts = strings.Split(districts.String, ",")
+	}
+	if energyLabels.Valid && energyLabels.String != "" {
+		filters.EnergyLabels = strings.Split(energyLabels.String, ",")
+	}
+
+	return filters, nil
+}
+
+// UpdateTelegramFilters updates the telegram notification filters
+func (d *Database) UpdateTelegramFilters(filters *models.TelegramFilters) error {
+	var districts, energyLabels sql.NullString
+
+	// Convert string arrays to database format
+	if len(filters.Districts) > 0 {
+		districts = sql.NullString{String: strings.Join(filters.Districts, ","), Valid: true}
+	}
+	if len(filters.EnergyLabels) > 0 {
+		energyLabels = sql.NullString{String: strings.Join(filters.EnergyLabels, ","), Valid: true}
+	}
+
+	_, err := d.db.Exec(`
+		UPDATE telegram_filters SET
+			min_price = $1,
+			max_price = $2,
+			min_living_area = $3,
+			max_living_area = $4,
+			min_rooms = $5,
+			max_rooms = $6,
+			districts = $7,
+			energy_labels = $8
+	`, filters.MinPrice, filters.MaxPrice,
+		filters.MinLivingArea, filters.MaxLivingArea,
+		filters.MinRooms, filters.MaxRooms,
+		districts, energyLabels)
+
+	if err != nil {
+		return fmt.Errorf("failed to update telegram filters: %v", err)
+	}
+
+	return nil
 }

@@ -16,10 +16,11 @@ import (
 )
 
 type Service struct {
-	logger *logrus.Logger
-	client *http.Client
-	config *models.TelegramConfig
-	db     *database.Database
+	logger  *logrus.Logger
+	client  *http.Client
+	config  *models.TelegramConfig
+	filters *models.TelegramFilters
+	db      *database.Database
 }
 
 func NewService(logger *logrus.Logger) *Service {
@@ -35,8 +36,16 @@ func (s *Service) UpdateConfig(config *models.TelegramConfig) {
 	s.config = config
 }
 
+func (s *Service) UpdateFilters(filters *models.TelegramFilters) {
+	s.filters = filters
+}
+
 func (s *Service) SetDatabase(db *database.Database) {
 	s.db = db
+	// Load filters from database
+	if filters, err := db.GetTelegramFilters(); err == nil {
+		s.filters = filters
+	}
 }
 
 // getPriceAnalysis returns the price analysis for a property
@@ -185,6 +194,29 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 
 	if s.config.ChatID == "" {
 		return errors.New("Telegram chat ID is not configured")
+	}
+
+	// Convert property map to Property struct for filter checking
+	prop := &models.Property{
+		Price:       int(property["price"].(float64)),
+		PostalCode:  property["postal_code"].(string),
+		EnergyLabel: property["energy_label"].(string),
+	}
+
+	// Handle optional fields
+	if la, ok := property["living_area"].(float64); ok {
+		livingArea := int(la)
+		prop.LivingArea = &livingArea
+	}
+	if nr, ok := property["num_rooms"].(float64); ok {
+		numRooms := int(nr)
+		prop.NumRooms = &numRooms
+	}
+
+	// Check if property matches filters
+	if s.filters != nil && !s.filters.IsPropertyAllowed(prop) {
+		s.logger.Info("Property filtered out by notification filters")
+		return nil
 	}
 
 	// Safely convert numeric values

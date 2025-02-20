@@ -9,24 +9,13 @@ import {
 import { 
     Box, Typography, CircularProgress, Paper, Grid,
     FormControl, InputLabel, Select, MenuItem,
-    Slider, Stack, TextField, Button
+    Slider, Stack, Button
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import * as d3 from 'd3';
 import PriceHeatmap from './PriceHeatmap';
-
-const COLORS = [
-    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-];
-
-interface PriceByPostalCodeData {
-    postal_code: string;
-    avg_price: number;
-    median_price: number;
-    count: number;
-}
+import { formatPrice } from '../utils/format';
 
 interface FilterOptions {
     startDate: Dayjs | null;

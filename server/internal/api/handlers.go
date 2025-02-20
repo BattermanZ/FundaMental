@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -291,6 +292,70 @@ func (h *Handler) UpdateTelegramConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Telegram configuration updated successfully"})
 }
 
+// GetTelegramFilters returns the current notification filters
+func (h *Handler) GetTelegramFilters(c *gin.Context) {
+	filters, err := h.db.GetTelegramFilters()
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to get Telegram filters")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get Telegram filters"})
+		return
+	}
+
+	c.JSON(http.StatusOK, filters)
+}
+
+// UpdateTelegramFilters updates the notification filters
+func (h *Handler) UpdateTelegramFilters(c *gin.Context) {
+	var filters models.TelegramFilters
+	if err := c.ShouldBindJSON(&filters); err != nil {
+		h.logger.WithError(err).Error("Invalid request body")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Validate numeric ranges
+	if filters.MinPrice != nil && filters.MaxPrice != nil && *filters.MinPrice > *filters.MaxPrice {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Minimum price cannot be greater than maximum price"})
+		return
+	}
+	if filters.MinLivingArea != nil && filters.MaxLivingArea != nil && *filters.MinLivingArea > *filters.MaxLivingArea {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Minimum living area cannot be greater than maximum living area"})
+		return
+	}
+	if filters.MinRooms != nil && filters.MaxRooms != nil && *filters.MinRooms > *filters.MaxRooms {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Minimum rooms cannot be greater than maximum rooms"})
+		return
+	}
+
+	// Validate districts format (4 digits)
+	for _, district := range filters.Districts {
+		if len(district) != 4 || !regexp.MustCompile(`^\d{4}$`).MatchString(district) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid district format. Must be 4 digits"})
+			return
+		}
+	}
+
+	// Validate energy labels
+	validLabels := map[string]bool{"A++": true, "A+": true, "A": true, "B": true, "C": true, "D": true, "E": true, "F": true, "G": true}
+	for _, label := range filters.EnergyLabels {
+		if !validLabels[label] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid energy label"})
+			return
+		}
+	}
+
+	if err := h.db.UpdateTelegramFilters(&filters); err != nil {
+		h.logger.WithError(err).Error("Failed to update Telegram filters")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save filters"})
+		return
+	}
+
+	// Update the service's filters
+	h.telegramService.UpdateFilters(&filters)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Telegram filters updated successfully"})
+}
+
 // TestTelegramConfig tests the Telegram configuration by sending a sample property notification
 func (h *Handler) TestTelegramConfig(c *gin.Context) {
 	// Get the current configuration from the database
@@ -308,10 +373,10 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 
 	// Create a sample property for testing
 	sampleProperty := map[string]interface{}{
-		"id":              int64(1), // Add ID for republish test
+		"id":              int64(1),
 		"street":          "Test Street 123",
 		"city":            "Amsterdam",
-		"postal_code":     "1012 AB", // Real Amsterdam postal code for better test
+		"postal_code":     "1012 AB",
 		"price":           450000,
 		"year_built":      2020,
 		"living_area":     85,
@@ -325,6 +390,11 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 	// Create a mock district analysis service that doesn't use the database
 	mockService := telegram.NewService(h.logger)
 	mockService.UpdateConfig(config)
+
+	// Get current filters and apply them to the mock service
+	if filters, err := h.db.GetTelegramFilters(); err == nil {
+		mockService.UpdateFilters(filters)
+	}
 
 	// Set the mock price analysis
 	sampleProperty["price_analysis"] = fmt.Sprintf("📊 <u>District Analysis</u>\n" +

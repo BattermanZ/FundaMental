@@ -12,6 +12,7 @@ import MarkerClusterGroup from 'react-leaflet-cluster';
 import { GeoJSON, Tooltip } from 'react-leaflet';
 import { Feature, Polygon } from 'geojson';
 import * as d3 from 'd3';
+import { formatPrice } from '../utils/format';
 
 // Fix for default marker icon
 delete (Icon.Default.prototype as any)._getIconUrl;
@@ -106,9 +107,6 @@ const PropertyMap: React.FC<PropertyMapProps> = ({ dateRange, metropolitanAreaId
             setGeocoding(false);
         }
     };
-
-    const formatPrice = (price: number) => 
-        `€${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
     const calculatePricePerSqm = (price: number, area: number | null) => {
         if (!area) return null;
@@ -465,7 +463,7 @@ const PriceLayer: React.FC<{ properties: Property[] }> = ({ properties }) => {
                 voronoiLayer.remove();
             }
         };
-    }, [map, properties]);
+    }, [map, properties, voronoiLayer]);
 
     useEffect(() => {
         if (voronoiLayer && map) {
