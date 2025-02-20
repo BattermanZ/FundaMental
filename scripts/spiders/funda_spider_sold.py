@@ -12,16 +12,9 @@ class FundaSpiderSold(scrapy.Spider):
     name = "funda_spider_sold"
     allowed_domains = ["funda.nl"]
     
+    # Only override settings that are specific to this spider
     custom_settings = {
-        'DOWNLOAD_DELAY': 2,
-        'CONCURRENT_REQUESTS': 2,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'AUTOTHROTTLE_ENABLED': True,
-        'AUTOTHROTTLE_START_DELAY': 2,
-        'AUTOTHROTTLE_MAX_DELAY': 30,
-        'AUTOTHROTTLE_TARGET_CONCURRENCY': 2.0,
-        'DOWNLOAD_TIMEOUT': 30,
-        'ITEM_PIPELINES': {}  # Temporarily disable pipelines to test the spider
+        'HTTPCACHE_ENABLED': True  # Enable caching for sold listings as they don't change
     }
 
     def __init__(self, place='amsterdam', max_pages=None, resume=False, *args, **kwargs):
@@ -36,6 +29,8 @@ class FundaSpiderSold(scrapy.Spider):
         self.resume = resume
         self.state = {}
         self.load_state() if resume else {}
+        self.buffer = []
+        self.buffer_size = 100  # Configurable batch size
         
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
@@ -209,6 +204,16 @@ class FundaSpiderSold(scrapy.Spider):
             self.logger.error(f"Blocked or verification required for URL: {response.url}")
             return
 
+        item = self.extract_property_data(response)
+        if item:
+            self.total_items_scraped += 1
+            self.buffer.append(item)
+            
+            # If buffer is full, yield the batch
+            if len(self.buffer) >= self.buffer_size:
+                yield from self.flush_buffer()
+
+    def extract_property_data(self, response):
         item = FundaItem()
         item['url'] = response.url
         item['status'] = 'sold'
@@ -387,12 +392,25 @@ class FundaSpiderSold(scrapy.Spider):
                         self.logger.warning(f"Failed to parse area from text '{area_text}': {e}")
                         continue
 
-        self.total_items_scraped += 1
-        if self.total_items_scraped % 10 == 0:  # Log progress every 10 items
-            self.logger.info(f"Progress: Scraped {self.total_items_scraped} items from {self.page_count} pages")
-        
         self.logger.info(f"Extracted item: {item}")
         return item
+
+    def flush_buffer(self):
+        """Flush the current buffer of properties."""
+        if not self.buffer:
+            return
+            
+        self.logger.info(f"Flushing buffer with {len(self.buffer)} properties")
+        properties_batch = self.buffer
+        self.buffer = []
+        
+        yield {
+            'type': 'properties_batch',
+            'items': properties_batch,
+            'timestamp': datetime.now().isoformat(),
+            'spider': self.name,
+            'city': self.place
+        }
 
     def closed(self, reason):
         """Called when the spider is closed."""
@@ -402,6 +420,11 @@ class FundaSpiderSold(scrapy.Spider):
         self.logger.info(f"Total new items found: {self.new_items_found}")
         self.logger.info(f"Total items scraped: {self.total_items_scraped}")
         self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}")
+        
+        # Flush any remaining items in buffer
+        if self.buffer:
+            self.logger.info(f"Flushing remaining {len(self.buffer)} properties on spider close")
+            yield from self.flush_buffer()
         
         # Save final state
         self.save_state() 

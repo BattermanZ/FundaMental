@@ -13,19 +13,9 @@ class FundaSpider(scrapy.Spider):
     name = "funda_spider"
     allowed_domains = ["funda.nl"]
     
+    # Only override settings that are specific to this spider
     custom_settings = {
-        'DOWNLOAD_DELAY': 2,
-        'CONCURRENT_REQUESTS': 2,
-        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'AUTOTHROTTLE_ENABLED': True,
-        'AUTOTHROTTLE_START_DELAY': 2,
-        'AUTOTHROTTLE_MAX_DELAY': 30,
-        'AUTOTHROTTLE_TARGET_CONCURRENCY': 2.0,
-        'DOWNLOAD_TIMEOUT': 30,
-        'ITEM_PIPELINES': {
-            'spiders.pipelines.TestPipeline': 300,
-            'spiders.pipelines.JsonExportPipeline': 500,
-        }
+        'HTTPCACHE_ENABLED': False  # Disable caching for active listings to ensure freshness'
     }
 
     def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
@@ -192,16 +182,20 @@ class FundaSpider(scrapy.Spider):
             self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
 
     def parse_property(self, response):
-        try:
-            property_item = self.extract_property_data(response)
-            self.buffer.append(property_item)
+        # Check if we're being blocked
+        if response.status == 403 or "Je bent bijna op de pagina die je zoekt" in response.text:
+            self.logger.error(f"Blocked or verification required for URL: {response.url}")
+            return
+
+        item = self.extract_property_data(response)
+        if item:
+            self.total_items_scraped += 1
+            self.buffer.append(item)
             
+            # If buffer is full, yield the batch
             if len(self.buffer) >= self.buffer_size:
                 yield from self.flush_buffer()
-                
-        except Exception as e:
-            self.logger.error(f"Error parsing property {response.url}: {str(e)}")
-            
+
     def extract_property_data(self, response):
         # Check if we're being blocked
         if response.status == 403 or "Je bent bijna op de pagina die je zoekt" in response.text:
@@ -449,7 +443,6 @@ class FundaSpider(scrapy.Spider):
         # Add scraped timestamp
         item['scraped_at'] = datetime.utcnow().isoformat()
 
-        self.total_items_scraped += 1
         if self.total_items_scraped % 10 == 0:  # Log progress every 10 items
             self.logger.info(f"Progress: Scraped {self.total_items_scraped} items from {self.page_count}")
         

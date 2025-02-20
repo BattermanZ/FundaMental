@@ -39,7 +39,7 @@ class JsonExportPipeline:
 
 class FundaPipeline:
     def __init__(self):
-        self.api_url = os.getenv('API_URL', 'http://localhost:8080')
+        self.api_url = os.getenv('API_URL', 'http://localhost:5250')
         self.session = requests.Session()
         self.logger = logging.getLogger(__name__)
         self.retry_count = 3
@@ -59,11 +59,11 @@ class FundaPipeline:
         for attempt in range(self.retry_count):
             try:
                 response = self.session.post(
-                    f"{self.api_url}/api/v1/properties/batch",
+                    f"{self.api_url}/api/properties/batch",
                     json={
                         'properties': properties,
                         'spider': spider.name,
-                        'city': spider.city
+                        'city': batch_item['city']
                     },
                     timeout=30
                 )
@@ -84,7 +84,7 @@ class FundaPipeline:
         for attempt in range(self.retry_count):
             try:
                 response = self.session.post(
-                    f"{self.api_url}/api/v1/properties",
+                    f"{self.api_url}/api/properties",
                     json=item,
                     timeout=10
                 )
