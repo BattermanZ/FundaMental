@@ -198,12 +198,14 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 
 	// Convert property map to Property struct for filter checking
 	prop := &models.Property{
-		Price:       int(property["price"].(float64)),
-		PostalCode:  property["postal_code"].(string),
-		EnergyLabel: property["energy_label"].(string),
+		Price:      int(property["price"].(float64)),
+		PostalCode: property["postal_code"].(string),
 	}
 
 	// Handle optional fields
+	if energyLabel, ok := property["energy_label"].(string); ok {
+		prop.EnergyLabel = energyLabel
+	}
 	if la, ok := property["living_area"].(float64); ok {
 		livingArea := int(la)
 		prop.LivingArea = &livingArea
@@ -358,7 +360,7 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		formatNumber(price/livingArea),
 		yearBuilt,
 		numRooms,
-		property["energy_label"],
+		prop.EnergyLabel,
 		priceAnalysis,
 		url,
 	)

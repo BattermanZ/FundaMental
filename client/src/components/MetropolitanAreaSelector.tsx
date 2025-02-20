@@ -21,11 +21,11 @@ const MetropolitanAreaSelector: React.FC<MetropolitanAreaSelectorProps> = ({ val
     useEffect(() => {
         const fetchAreas = async () => {
             try {
-                const data = await api.getMetropolitanAreas();
+                setLoading(true);
+                const data = await api.getMetroAreas();
                 setAreas(data || []);
             } catch (error) {
                 console.error('Failed to fetch metropolitan areas:', error);
-                setAreas([]);
             } finally {
                 setLoading(false);
             }

@@ -81,7 +81,7 @@ func main() {
 
 	// Setup API routes
 	api.SetupRoutes(router, db)
-	api.SetupMetropolitanRoutes(router, db)
+	api.SetupMetropolitanRoutes(router, db, geocoder)
 
 	// Setup graceful shutdown
 	quit := make(chan os.Signal, 1)
@@ -106,7 +106,7 @@ func main() {
 // migrateMetropolitanAreas migrates metropolitan areas from JSON to the database
 func migrateMetropolitanAreas(db *database.Database, logger *logrus.Logger) error {
 	// Get areas from JSON config
-	areas := config.GetMetropolitanAreas()
+	areas := config.GetMetroAreas()
 
 	// Migrate each area to the database
 	for _, area := range areas {
@@ -117,7 +117,7 @@ func migrateMetropolitanAreas(db *database.Database, logger *logrus.Logger) erro
 		}
 
 		// Save to database
-		if err := db.UpdateMetropolitanArea(dbArea); err != nil {
+		if err := db.UpdateMetroArea(dbArea); err != nil {
 			return fmt.Errorf("failed to migrate area %s: %v", area.Name, err)
 		}
 

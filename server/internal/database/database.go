@@ -390,6 +390,9 @@ func (d *Database) RunMigrations() error {
 		CREATE TABLE IF NOT EXISTS metropolitan_areas (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT UNIQUE NOT NULL,
+			center_lat REAL,
+			center_lng REAL,
+			zoom_level INTEGER DEFAULT 13,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
@@ -417,12 +420,56 @@ func (d *Database) RunMigrations() error {
 		CREATE TABLE IF NOT EXISTS metropolitan_cities (
 			metropolitan_area_id INTEGER,
 			city TEXT NOT NULL,
+			lat REAL,
+			lng REAL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (metropolitan_area_id, city)
 		);
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create metropolitan_cities table: %v", err)
+	}
+
+	// Add coordinate columns to metropolitan_areas if they don't exist
+	_, err = d.db.Exec(`
+		ALTER TABLE metropolitan_areas 
+		ADD COLUMN center_lat REAL;
+	`)
+	if err != nil && err.Error() != "duplicate column name: center_lat" {
+		return err
+	}
+
+	_, err = d.db.Exec(`
+		ALTER TABLE metropolitan_areas 
+		ADD COLUMN center_lng REAL;
+	`)
+	if err != nil && err.Error() != "duplicate column name: center_lng" {
+		return err
+	}
+
+	_, err = d.db.Exec(`
+		ALTER TABLE metropolitan_areas 
+		ADD COLUMN zoom_level INTEGER DEFAULT 13;
+	`)
+	if err != nil && err.Error() != "duplicate column name: zoom_level" {
+		return err
+	}
+
+	// Add coordinate columns to metropolitan_cities if they don't exist
+	_, err = d.db.Exec(`
+		ALTER TABLE metropolitan_cities 
+		ADD COLUMN lat REAL;
+	`)
+	if err != nil && err.Error() != "duplicate column name: lat" {
+		return err
+	}
+
+	_, err = d.db.Exec(`
+		ALTER TABLE metropolitan_cities 
+		ADD COLUMN lng REAL;
+	`)
+	if err != nil && err.Error() != "duplicate column name: lng" {
+		return err
 	}
 
 	// Add republish_count column if it doesn't exist
@@ -818,10 +865,13 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 	return newProperties, nil
 }
 
-// GetMetropolitanAreas returns all metropolitan areas
-func (d *Database) GetMetropolitanAreas() ([]models.MetropolitanArea, error) {
+// GetMetroAreas returns all metropolitan areas with their coordinates
+func (d *Database) GetMetroAreas() ([]models.MetropolitanArea, error) {
 	rows, err := d.db.Query(`
-		SELECT m.id, m.name, GROUP_CONCAT(mc.city, ',') as cities
+		SELECT m.id, m.name, m.center_lat, m.center_lng, m.zoom_level,
+		       GROUP_CONCAT(mc.city) as cities,
+		       GROUP_CONCAT(mc.lat) as city_lats,
+		       GROUP_CONCAT(mc.lng) as city_lngs
 		FROM metropolitan_areas m
 		LEFT JOIN metropolitan_cities mc ON m.id = mc.metropolitan_area_id
 		GROUP BY m.id, m.name
@@ -835,15 +885,26 @@ func (d *Database) GetMetropolitanAreas() ([]models.MetropolitanArea, error) {
 	var areas []models.MetropolitanArea
 	for rows.Next() {
 		var area models.MetropolitanArea
-		var citiesStr sql.NullString
-		if err := rows.Scan(&area.ID, &area.Name, &citiesStr); err != nil {
+		var citiesStr, latStr, lngStr sql.NullString
+		if err := rows.Scan(
+			&area.ID,
+			&area.Name,
+			&area.CenterLat,
+			&area.CenterLng,
+			&area.ZoomLevel,
+			&citiesStr,
+			&latStr,
+			&lngStr,
+		); err != nil {
 			return nil, fmt.Errorf("failed to scan metropolitan area: %v", err)
 		}
+
 		if citiesStr.Valid && citiesStr.String != "" {
 			area.Cities = strings.Split(citiesStr.String, ",")
 		} else {
 			area.Cities = []string{}
 		}
+
 		areas = append(areas, area)
 	}
 
@@ -854,8 +915,66 @@ func (d *Database) GetMetropolitanAreas() ([]models.MetropolitanArea, error) {
 	return areas, nil
 }
 
-// GetMetropolitanAreaByName returns a specific metropolitan area by name
-func (d *Database) GetMetropolitanAreaByName(name string) (*models.MetropolitanArea, error) {
+// CalculateMetropolitanCenter calculates and updates the geometric center of a metropolitan area
+func (d *Database) CalculateMetropolitanCenter(areaID int64) error {
+	rows, err := d.db.Query(`
+		SELECT lat, lng
+		FROM metropolitan_cities
+		WHERE metropolitan_area_id = ? AND lat IS NOT NULL AND lng IS NOT NULL
+	`, areaID)
+	if err != nil {
+		return fmt.Errorf("failed to query city coordinates: %v", err)
+	}
+	defer rows.Close()
+
+	var sumLat, sumLng float64
+	var count int
+
+	for rows.Next() {
+		var lat, lng float64
+		if err := rows.Scan(&lat, &lng); err != nil {
+			return fmt.Errorf("failed to scan coordinates: %v", err)
+		}
+		sumLat += lat
+		sumLng += lng
+		count++
+	}
+
+	if count == 0 {
+		return fmt.Errorf("no valid coordinates found for metropolitan area %d", areaID)
+	}
+
+	centerLat := sumLat / float64(count)
+	centerLng := sumLng / float64(count)
+
+	_, err = d.db.Exec(`
+		UPDATE metropolitan_areas
+		SET center_lat = ?, center_lng = ?
+		WHERE id = ?
+	`, centerLat, centerLng, areaID)
+	if err != nil {
+		return fmt.Errorf("failed to update metropolitan center: %v", err)
+	}
+
+	return nil
+}
+
+// UpdateCityCoordinates updates the coordinates for a city in a metropolitan area
+func (d *Database) UpdateCityCoordinates(areaID int64, city string, lat, lng float64) error {
+	_, err := d.db.Exec(`
+		UPDATE metropolitan_cities
+		SET lat = ?, lng = ?
+		WHERE metropolitan_area_id = ? AND city = ?
+	`, lat, lng, areaID, city)
+	if err != nil {
+		return fmt.Errorf("failed to update city coordinates: %v", err)
+	}
+
+	return d.CalculateMetropolitanCenter(areaID)
+}
+
+// GetMetroAreaByName returns a specific metropolitan area by name
+func (d *Database) GetMetroAreaByName(name string) (*models.MetropolitanArea, error) {
 	var area models.MetropolitanArea
 	var citiesStr sql.NullString
 
@@ -883,8 +1002,8 @@ func (d *Database) GetMetropolitanAreaByName(name string) (*models.MetropolitanA
 	return &area, nil
 }
 
-// UpdateMetropolitanArea updates or creates a metropolitan area
-func (d *Database) UpdateMetropolitanArea(area models.MetropolitanArea) error {
+// UpdateMetroArea updates or creates a metropolitan area
+func (d *Database) UpdateMetroArea(area models.MetropolitanArea) error {
 	// Start a transaction
 	tx, err := d.db.Begin()
 	if err != nil {
@@ -903,7 +1022,10 @@ func (d *Database) UpdateMetropolitanArea(area models.MetropolitanArea) error {
 	var id int64
 	if err == sql.ErrNoRows {
 		// Insert new area
-		result, err := tx.Exec("INSERT INTO metropolitan_areas (name) VALUES (?)", area.Name)
+		result, err := tx.Exec(`
+			INSERT INTO metropolitan_areas (name, center_lat, center_lng, zoom_level) 
+			VALUES (?, ?, ?, ?)
+		`, area.Name, area.CenterLat, area.CenterLng, area.ZoomLevel)
 		if err != nil {
 			return fmt.Errorf("failed to insert metropolitan area: %v", err)
 		}
@@ -914,6 +1036,14 @@ func (d *Database) UpdateMetropolitanArea(area models.MetropolitanArea) error {
 	} else {
 		// Update existing area
 		id = existingID
+		_, err = tx.Exec(`
+			UPDATE metropolitan_areas 
+			SET center_lat = ?, center_lng = ?, zoom_level = ?
+			WHERE id = ?
+		`, area.CenterLat, area.CenterLng, area.ZoomLevel, id)
+		if err != nil {
+			return fmt.Errorf("failed to update metropolitan area: %v", err)
+		}
 	}
 
 	// Delete existing cities for this metropolitan area
@@ -925,9 +1055,9 @@ func (d *Database) UpdateMetropolitanArea(area models.MetropolitanArea) error {
 	// Insert new cities
 	for _, city := range area.Cities {
 		_, err = tx.Exec(`
-			INSERT INTO metropolitan_cities (metropolitan_area_id, city)
-			VALUES (?, ?)
-		`, id, city)
+			INSERT INTO metropolitan_cities (metropolitan_area_id, city, lat, lng)
+			VALUES (?, ?, ?, ?)
+		`, id, city, nil, nil) // Coordinates will be updated by geocoding service
 		if err != nil {
 			return fmt.Errorf("failed to insert city: %v", err)
 		}
@@ -941,8 +1071,8 @@ func (d *Database) UpdateMetropolitanArea(area models.MetropolitanArea) error {
 	return nil
 }
 
-// DeleteMetropolitanArea deletes a metropolitan area and its cities
-func (d *Database) DeleteMetropolitanArea(name string) error {
+// DeleteMetroArea deletes a metropolitan area and its cities
+func (d *Database) DeleteMetroArea(name string) error {
 	result, err := d.db.Exec("DELETE FROM metropolitan_areas WHERE name = ?", name)
 	if err != nil {
 		return fmt.Errorf("failed to delete metropolitan area: %v", err)
@@ -960,8 +1090,8 @@ func (d *Database) DeleteMetropolitanArea(name string) error {
 	return nil
 }
 
-// GetCitiesInMetropolitanArea returns all cities in a metropolitan area
-func (d *Database) GetCitiesInMetropolitanArea(name string) ([]string, error) {
+// GetCitiesInMetro returns all cities in a metropolitan area
+func (d *Database) GetCitiesInMetro(name string) ([]string, error) {
 	rows, err := d.db.Query(`
 		SELECT mc.city
 		FROM metropolitan_cities mc

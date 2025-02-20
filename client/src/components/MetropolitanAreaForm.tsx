@@ -28,7 +28,10 @@ const filter = createFilterOptions<string>();
 const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSubmit, onCancel }) => {
     const [formData, setFormData] = useState<MetropolitanAreaFormData>({
         name: '',
-        cities: []
+        cities: [],
+        center_lat: undefined,
+        center_lng: undefined,
+        zoom_level: undefined
     });
     const [error, setError] = useState<string | null>(null);
     const [availableCities] = useState<string[]>([
@@ -42,7 +45,10 @@ const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSub
         if (area) {
             setFormData({
                 name: area.name,
-                cities: area.cities
+                cities: area.cities,
+                center_lat: area.center_lat,
+                center_lng: area.center_lng,
+                zoom_level: area.zoom_level
             });
         }
     }, [area]);
@@ -64,9 +70,9 @@ const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSub
 
         try {
             if (area) {
-                await api.updateMetropolitanArea(area.name, formData);
+                await api.updateMetroArea(area.name, formData);
             } else {
-                await api.createMetropolitanArea(formData);
+                await api.createMetroArea(formData);
             }
             onSubmit();
         } catch (error: any) {
@@ -162,6 +168,35 @@ const MetropolitanAreaForm: React.FC<MetropolitanAreaFormProps> = ({ area, onSub
                             <FormHelperText>At least one city must be selected</FormHelperText>
                         )}
                     </FormControl>
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                        <TextField
+                            label="Center Latitude"
+                            type="number"
+                            value={formData.center_lat || ''}
+                            onChange={(e) => setFormData({ ...formData, center_lat: parseFloat(e.target.value) || undefined })}
+                            fullWidth
+                            inputProps={{ step: 'any' }}
+                            disabled={!area} // Only allow editing for existing areas
+                        />
+                        <TextField
+                            label="Center Longitude"
+                            type="number"
+                            value={formData.center_lng || ''}
+                            onChange={(e) => setFormData({ ...formData, center_lng: parseFloat(e.target.value) || undefined })}
+                            fullWidth
+                            inputProps={{ step: 'any' }}
+                            disabled={!area} // Only allow editing for existing areas
+                        />
+                        <TextField
+                            label="Zoom Level"
+                            type="number"
+                            value={formData.zoom_level || ''}
+                            onChange={(e) => setFormData({ ...formData, zoom_level: parseInt(e.target.value) || undefined })}
+                            fullWidth
+                            inputProps={{ min: 1, max: 20, step: 1 }}
+                            disabled={!area} // Only allow editing for existing areas
+                        />
+                    </Box>
                     {error && !error.includes('city') && (
                         <Alert severity="error" sx={{ mt: 1 }}>
                             {error}

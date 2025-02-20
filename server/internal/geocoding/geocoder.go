@@ -20,17 +20,33 @@ type Geocoder struct {
 	cache     map[string][]float64
 	cacheLock sync.RWMutex
 	client    *http.Client
+	rateLimit time.Duration
+	lastCall  time.Time
 }
+
+type GeocodingResult struct {
+	Lat float64
+	Lng float64
+}
+
+const (
+	// Netherlands bounding box
+	NL_MIN_LAT = 50.75
+	NL_MAX_LAT = 53.55
+	NL_MIN_LNG = 3.35
+	NL_MAX_LNG = 7.22
+)
 
 func NewGeocoder(logger *logrus.Logger, cacheDir string) *Geocoder {
 	// Create cache directory if it doesn't exist
 	os.MkdirAll(cacheDir, 0755)
 
 	g := &Geocoder{
-		logger:   logger,
-		cacheDir: cacheDir,
-		cache:    make(map[string][]float64),
-		client:   &http.Client{Timeout: 10 * time.Second},
+		logger:    logger,
+		cacheDir:  cacheDir,
+		cache:     make(map[string][]float64),
+		client:    &http.Client{Timeout: 10 * time.Second},
+		rateLimit: time.Second, // 1 request per second
 	}
 
 	// Load cache from file
@@ -170,4 +186,110 @@ func (g *Geocoder) GeocodeAddress(street, postalCode, city string) (float64, flo
 	go g.saveCache()
 
 	return lat, lon, nil
+}
+
+// GeocodeCity geocodes a city name with country context
+func (g *Geocoder) GeocodeCity(city string) (*GeocodingResult, error) {
+	// Check cache first
+	if result := g.getCityFromCache(city); result != nil {
+		g.logger.Infof("Found city %s in cache", city)
+		return result, nil
+	}
+
+	// Rate limiting
+	if time.Since(g.lastCall) < g.rateLimit {
+		time.Sleep(g.rateLimit - time.Since(g.lastCall))
+	}
+	g.lastCall = time.Now()
+
+	// Construct the query with Netherlands context
+	query := fmt.Sprintf("%s, Netherlands", city)
+	encodedQuery := url.QueryEscape(query)
+	url := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1", encodedQuery)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Set User-Agent as required by Nominatim
+	req.Header.Set("User-Agent", "FundaMental/1.0")
+
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("geocoding request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var results []struct {
+		Lat string `json:"lat"`
+		Lon string `json:"lon"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no results found for city: %s", city)
+	}
+
+	// Parse coordinates
+	var lat, lng float64
+	fmt.Sscanf(results[0].Lat, "%f", &lat)
+	fmt.Sscanf(results[0].Lon, "%f", &lng)
+
+	// Validate coordinates are within Netherlands
+	if !g.isWithinNetherlands(lat, lng) {
+		return nil, fmt.Errorf("coordinates for %s are outside Netherlands bounds", city)
+	}
+
+	result := &GeocodingResult{
+		Lat: lat,
+		Lng: lng,
+	}
+
+	// Cache the result
+	g.cacheCityResult(city, result)
+
+	return result, nil
+}
+
+func (g *Geocoder) isWithinNetherlands(lat, lng float64) bool {
+	return lat >= NL_MIN_LAT && lat <= NL_MAX_LAT &&
+		lng >= NL_MIN_LNG && lng <= NL_MAX_LNG
+}
+
+func (g *Geocoder) getCityFromCache(city string) *GeocodingResult {
+	cacheFile := filepath.Join(g.cacheDir, fmt.Sprintf("city_%s.json", city))
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		return nil
+	}
+
+	var result GeocodingResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		g.logger.Warnf("Failed to unmarshal cached city data: %v", err)
+		return nil
+	}
+
+	return &result
+}
+
+func (g *Geocoder) cacheCityResult(city string, result *GeocodingResult) {
+	data, err := json.Marshal(result)
+	if err != nil {
+		g.logger.Warnf("Failed to marshal city result: %v", err)
+		return
+	}
+
+	cacheFile := filepath.Join(g.cacheDir, fmt.Sprintf("city_%s.json", city))
+	if err := os.MkdirAll(g.cacheDir, 0755); err != nil {
+		g.logger.Warnf("Failed to create cache directory: %v", err)
+		return
+	}
+
+	if err := os.WriteFile(cacheFile, data, 0644); err != nil {
+		g.logger.Warnf("Failed to write city cache file: %v", err)
+	}
 }

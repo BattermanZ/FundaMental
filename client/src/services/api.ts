@@ -62,22 +62,22 @@ export const api = {
     },
 
     // Metropolitan Area endpoints
-    getMetropolitanAreas: async (): Promise<MetropolitanArea[]> => {
+    getMetroAreas: async (): Promise<MetropolitanArea[]> => {
         const response = await axiosInstance.get('/metropolitan');
         return response.data;
     },
 
-    getMetropolitanArea: async (name: string): Promise<MetropolitanArea> => {
+    getMetroArea: async (name: string): Promise<MetropolitanArea> => {
         const response = await axiosInstance.get(`/metropolitan/${name}`);
         return response.data;
     },
 
-    createMetropolitanArea: async (data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
+    createMetroArea: async (data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
         const response = await axiosInstance.post('/metropolitan', data);
         return response.data;
     },
 
-    updateMetropolitanArea: async (name: string, data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
+    updateMetroArea: async (name: string, data: MetropolitanAreaFormData): Promise<MetropolitanArea> => {
         const response = await axiosInstance.put(`/metropolitan/${name}`, {
             ...data,
             name // Ensure name in body matches URL
@@ -85,8 +85,14 @@ export const api = {
         return response.data;
     },
 
-    deleteMetropolitanArea: async (name: string): Promise<void> => {
+    deleteMetroArea: async (name: string): Promise<void> => {
         await axiosInstance.delete(`/metropolitan/${name}`);
+    },
+
+    // Geocode a metropolitan area's cities
+    geocodeMetroArea: async (name: string): Promise<MetropolitanArea> => {
+        const response = await axiosInstance.post(`/metropolitan/${name}/geocode`);
+        return response.data;
     },
 
     // Telegram configuration endpoints

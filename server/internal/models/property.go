@@ -43,7 +43,26 @@ type AreaStats struct {
 }
 
 type MetropolitanArea struct {
-	ID     int64    `json:"id"`
-	Name   string   `json:"name"`
-	Cities []string `json:"cities"`
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Cities    []string `json:"cities"`
+	CenterLat *float64 `json:"center_lat,omitempty"`
+	CenterLng *float64 `json:"center_lng,omitempty"`
+	ZoomLevel *int     `json:"zoom_level,omitempty"`
+}
+
+type MetropolitanCity struct {
+	ID                 int64   `json:"id"`
+	MetropolitanAreaID int64   `json:"metropolitan_area_id"`
+	City               string  `json:"city"`
+	Lat                float64 `json:"lat,omitempty"`
+	Lng                float64 `json:"lng,omitempty"`
+}
+
+// MetropolitanConfig represents the configuration format for metropolitan areas
+type MetropolitanConfig struct {
+	MetropolitanAreas []struct {
+		Name   string   `json:"name"`
+		Cities []string `json:"cities"`
+	} `json:"metropolitan_areas"`
 }
