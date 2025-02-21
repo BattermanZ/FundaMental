@@ -109,5 +109,13 @@ export const api = {
     testTelegramConfig: async () => {
         const response = await axiosInstance.post('/telegram/config/test');
         return response.data;
+    },
+
+    checkInitialSetup: async () => {
+        const response = await fetch(`${API_BASE_URL}/setup/check`);
+        if (!response.ok) {
+            throw new Error('Failed to check initial setup');
+        }
+        return response.json();
     }
 }; 

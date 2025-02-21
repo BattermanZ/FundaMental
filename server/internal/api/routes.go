@@ -11,6 +11,8 @@ func SetupRoutes(router *gin.Engine, db *database.Database) {
 
 	api := router.Group("/api")
 	{
+		api.GET("/setup/check", handler.CheckInitialSetup)
+
 		api.GET("/properties", handler.GetAllProperties)
 		api.GET("/properties/stats", handler.GetPropertyStats)
 		api.GET("/properties/recent", handler.GetRecentSales)

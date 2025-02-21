@@ -1,11 +1,12 @@
-import React, { useState, createContext, useContext } from 'react';
-import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab, Paper, Stack } from '@mui/material';
+import React, { useState, createContext, useContext, useEffect } from 'react';
+import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab, Paper, Stack, Alert } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
+import { api } from './services/api';
 import PropertyMap from './components/PropertyMap';
 import PropertyStats from './components/PropertyStats';
 import PropertyCharts from './components/PropertyCharts';
@@ -36,6 +37,43 @@ const StyledContainer = styled(Container)(({ theme }) => ({
 const StyledSection = styled(Box)(({ theme }) => ({
     marginBottom: theme.spacing(4),
 }));
+
+// Add a new component to handle setup check and redirection
+const SetupCheck = ({ children }: { children: React.ReactNode }) => {
+    const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const location = useLocation();
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        const checkSetup = async () => {
+            try {
+                const result = await api.checkInitialSetup();
+                setNeedsSetup(result.needs_setup);
+                
+                // Redirect to config if setup is needed and we're not already there
+                if (result.needs_setup && location.pathname !== '/config') {
+                    navigate('/config');
+                }
+            } catch (err) {
+                setError('Failed to check application setup status');
+                console.error('Setup check failed:', err);
+            }
+        };
+
+        checkSetup();
+    }, [navigate, location.pathname]);
+
+    if (error) {
+        return <Alert severity="error">{error}</Alert>;
+    }
+
+    if (needsSetup === null) {
+        return null; // or a loading spinner
+    }
+
+    return <>{children}</>;
+};
 
 // Create separate page components
 const DashboardPage = () => {
@@ -175,11 +213,13 @@ function App() {
                         <Navigation />
 
                         <StyledContainer>
-                            <Routes>
-                                <Route path="/" element={<DashboardPage />} />
-                                <Route path="/analytics" element={<AnalyticsPage />} />
-                                <Route path="/config" element={<ConfigPage />} />
-                            </Routes>
+                            <SetupCheck>
+                                <Routes>
+                                    <Route path="/" element={<DashboardPage />} />
+                                    <Route path="/analytics" element={<AnalyticsPage />} />
+                                    <Route path="/config" element={<ConfigPage />} />
+                                </Routes>
+                            </SetupCheck>
                         </StyledContainer>
                     </Box>
                 </MetropolitanContext.Provider>

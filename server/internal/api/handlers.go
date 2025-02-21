@@ -447,3 +447,18 @@ func (h *Handler) TestTelegramConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Test notification sent successfully"})
 }
+
+// CheckInitialSetup checks if the database needs initial configuration
+func (h *Handler) CheckInitialSetup(c *gin.Context) {
+	areas, err := h.db.GetMetropolitanAreas()
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to check metropolitan areas")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check database state"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"needs_setup": len(areas) == 0,
+		"message":     "Database initialization check completed",
+	})
+}
