@@ -48,12 +48,32 @@ export default function TelegramConfiguration() {
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleEnableToggle = async (enabled: boolean) => {
+        try {
+            await updateTelegramConfig({
+                ...config,
+                is_enabled: enabled
+            });
+            setConfig(prev => ({ ...prev, is_enabled: enabled }));
+            toast.success(enabled ? 'Notifications enabled' : 'Notifications disabled');
+        } catch (error) {
+            toast.error('Failed to update notification status');
+            // Revert the switch if the update failed
+            setConfig(prev => ({ ...prev, is_enabled: !enabled }));
+        }
+    };
+
+    const handleSaveConfig = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         try {
-            await updateTelegramConfig(config);
-            toast.success('Configuration updated successfully');
+            // Only update bot token and chat ID
+            await updateTelegramConfig({
+                ...config,
+                bot_token: config.bot_token,
+                chat_id: config.chat_id
+            });
+            toast.success('Bot configuration updated successfully');
         } catch (error) {
             if (error instanceof Error) {
                 toast.error(error.message);
@@ -105,7 +125,7 @@ export default function TelegramConfiguration() {
                         control={
                             <Switch
                                 checked={config.is_enabled}
-                                onChange={e => setConfig(prev => ({ ...prev, is_enabled: e.target.checked }))}
+                                onChange={e => handleEnableToggle(e.target.checked)}
                                 color="primary"
                             />
                         }
@@ -113,7 +133,7 @@ export default function TelegramConfiguration() {
                     />
                 </Box>
 
-                <form onSubmit={handleSubmit}>
+                <form onSubmit={handleSaveConfig}>
                     <Stack spacing={3}>
                         <FormControl variant="outlined">
                             <InputLabel htmlFor="bot-token">Bot Token</InputLabel>
@@ -149,7 +169,7 @@ export default function TelegramConfiguration() {
                         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2 }}>
                             <Button
                                 onClick={handleTest}
-                                disabled={testing || loading || !config.is_enabled}
+                                disabled={testing || loading || !config.is_enabled || !config.bot_token || !config.chat_id}
                                 variant="outlined"
                                 startIcon={<SendIcon />}
                             >
@@ -161,7 +181,7 @@ export default function TelegramConfiguration() {
                                 variant="contained"
                                 startIcon={<SaveIcon />}
                             >
-                                {loading ? 'Saving...' : 'Save Configuration'}
+                                {loading ? 'Saving...' : 'Save Bot Configuration'}
                             </Button>
                         </Box>
                     </Stack>
