@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"fundamental/server/config"
 	"fundamental/server/internal/database"
 	"fundamental/server/internal/geocoding"
 	"fundamental/server/internal/geometry"
@@ -175,12 +176,35 @@ func (h *Handler) UpdateDistrictHulls(c *gin.Context) {
 
 func (h *Handler) RunActiveSpider(c *gin.Context) {
 	var req SpiderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.WithError(err).Error("Failed to parse spider request")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
+	if err := c.ShouldBindJSON(&req); err != nil || req.Place == "" {
+		// If no parameters provided or invalid JSON, use configured cities
+		cities, err := config.GetCityNames(h.db)
+		if err != nil {
+			h.logger.WithError(err).Error("Failed to get configured cities")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configured cities"})
+			return
+		}
+
+		// Start spider for each configured city
+		for _, city := range cities {
+			normalizedCity := config.NormalizeCity(city)
+			err := h.spiderManager.RunActiveSpider(normalizedCity, nil)
+			if err != nil {
+				h.logger.WithError(err).WithField("city", city).Error("Failed to run active spider")
+				// Continue with other cities even if one fails
+				continue
+			}
+			h.logger.WithField("city", city).Info("Started active spider successfully")
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": "Active spiders started for all configured cities",
+		})
 		return
 	}
 
+	// If parameters were provided, use them
 	err := h.spiderManager.RunActiveSpider(req.Place, req.MaxPages)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to run active spider")
@@ -196,12 +220,35 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 
 func (h *Handler) RunSoldSpider(c *gin.Context) {
 	var req SpiderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.WithError(err).Error("Failed to parse spider request")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
+	if err := c.ShouldBindJSON(&req); err != nil || req.Place == "" {
+		// If no parameters provided or invalid JSON, use configured cities
+		cities, err := config.GetCityNames(h.db)
+		if err != nil {
+			h.logger.WithError(err).Error("Failed to get configured cities")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configured cities"})
+			return
+		}
+
+		// Start spider for each configured city
+		for _, city := range cities {
+			normalizedCity := config.NormalizeCity(city)
+			err := h.spiderManager.RunSoldSpider(normalizedCity, nil, req.Resume)
+			if err != nil {
+				h.logger.WithError(err).WithField("city", city).Error("Failed to run sold spider")
+				// Continue with other cities even if one fails
+				continue
+			}
+			h.logger.WithField("city", city).Info("Started sold spider successfully")
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": "Sold spiders started for all configured cities",
+		})
 		return
 	}
 
+	// If parameters were provided, use them
 	err := h.spiderManager.RunSoldSpider(req.Place, req.MaxPages, req.Resume)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to run sold spider")

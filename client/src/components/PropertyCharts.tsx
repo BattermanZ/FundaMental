@@ -117,6 +117,7 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
 
     // Memoize filtered properties
     const filteredPropertiesMemo = useMemo(() => {
+        if (!properties || properties.length === 0) return [];
         return properties.filter(property => {
             // Date filter - check listing_date/scraped_at for active and selling_date for sold
             if (filters.startDate) {
