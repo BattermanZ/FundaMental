@@ -27,7 +27,7 @@ type SpiderManager struct {
 // SpiderParams contains parameters for running a spider
 type SpiderParams struct {
 	SpiderType string `json:"spider_type"` // "active" or "sold"
-	Place      string `json:"place"`       // e.g., "amsterdam"
+	Place      string `json:"place"`       // normalized city name (e.g., "den-bosch" not "'s-Hertogenbosch")
 	MaxPages   *int   `json:"max_pages"`   // optional max pages to scrape
 	Resume     bool   `json:"resume"`      // whether to resume from previous state
 }
@@ -71,10 +71,11 @@ func NewSpiderManager(db *database.Database, logger *logrus.Logger) *SpiderManag
 }
 
 // RunSpider executes a spider with the given parameters
+// Place parameter must be normalized (lowercase, hyphenated, special cases handled)
 func (m *SpiderManager) RunSpider(params SpiderParams) error {
 	m.logger.WithFields(logrus.Fields{
 		"spider_type": params.SpiderType,
-		"place":       params.Place,
+		"place":       params.Place, // Already normalized by scheduler
 		"max_pages":   params.MaxPages,
 		"resume":      params.Resume,
 	}).Info("Starting spider")
@@ -136,19 +137,30 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 		if err := json.Unmarshal(line, &message); err == nil && message.Type != "" {
 			switch message.Type {
 			case "items":
-				// Process scraped items
+				// Process scraped items one by one
 				var items []map[string]interface{}
 				if err := json.Unmarshal(message.Data, &items); err != nil {
 					m.logger.WithError(err).Error("Failed to parse items data")
 					continue
 				}
-				m.logger.WithField("items", items).Info("Received items from spider")
-				// Process items using InsertProperties
-				newProperties, err := m.db.InsertProperties(items)
-				if err != nil {
-					m.logger.WithError(err).Error("Failed to store properties")
-				} else {
-					// After successful insertion, trigger geocoding in a background goroutine
+				m.logger.WithField("items_count", len(items)).Info("Received items from spider")
+
+				// Process each item individually
+				var newProperties []map[string]interface{}
+				for _, item := range items {
+					processedItems, err := m.db.InsertProperties([]map[string]interface{}{item})
+					if err != nil {
+						m.logger.WithError(err).Error("Failed to store property")
+						continue
+					}
+					if len(processedItems) > 0 {
+						newProperties = append(newProperties, processedItems[0])
+					}
+				}
+
+				// After processing all items, handle geocoding and notifications
+				if len(newProperties) > 0 {
+					// Trigger geocoding in a background goroutine
 					go func() {
 						m.logger.Info("Starting geocoding for newly inserted properties...")
 						if err := m.db.UpdateMissingCoordinates(m.geocoder); err != nil {
@@ -157,21 +169,19 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 					}()
 
 					// Send notifications for new properties
-					if len(newProperties) > 0 {
-						// Get the current Telegram configuration
-						config, err := m.db.GetTelegramConfig()
-						if err != nil {
-							m.logger.WithError(err).Error("Failed to get Telegram config")
-						} else if config != nil {
-							m.telegramService.UpdateConfig(config)
-							for _, prop := range newProperties {
-								if err := m.telegramService.NotifyNewProperty(prop); err != nil {
-									m.logger.WithError(err).Error("Failed to send Telegram notification")
-								}
+					config, err := m.db.GetTelegramConfig()
+					if err != nil {
+						m.logger.WithError(err).Error("Failed to get Telegram config")
+					} else if config != nil {
+						m.telegramService.UpdateConfig(config)
+						for _, prop := range newProperties {
+							if err := m.telegramService.NotifyNewProperty(prop); err != nil {
+								m.logger.WithError(err).Error("Failed to send Telegram notification")
 							}
 						}
 					}
 				}
+
 			case "error":
 				var errorData map[string]interface{}
 				if err := json.Unmarshal(message.Data, &errorData); err != nil {

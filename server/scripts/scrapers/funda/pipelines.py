@@ -58,13 +58,13 @@ class JsonMessagePipeline:
         # Convert item to dictionary using to_dict method
         item_dict = item.to_dict()
         
-        # Create message
+        # Create and send message for single item
         message = {
             'type': 'items',
-            'data': [item_dict]  # Wrap in list since manager expects array
+            'data': [item_dict]  # Keep list format for backward compatibility
         }
         
-        # Write message to stdout
+        # Write message to stdout immediately
         print(json.dumps(message), flush=True)
         return item
     

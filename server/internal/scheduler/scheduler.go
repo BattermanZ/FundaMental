@@ -1,13 +1,9 @@
 package scheduler
 
 import (
-	"bufio"
-	"fmt"
 	"fundamental/server/config"
 	"fundamental/server/internal/scraping"
 	"os"
-	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -43,9 +39,10 @@ type Scheduler struct {
 	logger        *logrus.Logger
 	stopChan      chan struct{}
 	wg            sync.WaitGroup
-	cities        []string
-	jobMutex      sync.Mutex // Ensures sequential job execution
-	isStartupRun  bool       // Tracks whether we're in startup run
+	cities        []string          // original city names
+	normalizedMap map[string]string // maps original -> normalized
+	jobMutex      sync.Mutex        // Ensures sequential job execution
+	isStartupRun  bool              // Tracks whether we're in startup run
 }
 
 // NewScheduler creates a new scheduler
@@ -57,12 +54,19 @@ func NewScheduler(spiderManager *scraping.SpiderManager, logger *logrus.Logger, 
 		logger.SetLevel(logrus.InfoLevel)
 	}
 
+	// Create normalized map
+	normalizedMap := make(map[string]string)
+	for _, city := range cities {
+		normalizedMap[city] = config.NormalizeCity(city)
+	}
+
 	return &Scheduler{
 		spiderManager: spiderManager,
 		logger:        logger,
 		stopChan:      make(chan struct{}),
 		cities:        cities,
-		isStartupRun:  true, // Initialize as true for startup
+		normalizedMap: normalizedMap,
+		isStartupRun:  true,
 	}
 }
 
@@ -137,23 +141,23 @@ func (s *Scheduler) executeScheduledJobs(t time.Time) {
 func (s *Scheduler) runActiveSpiders() {
 	s.logger.Info("Starting active spider run")
 	for _, city := range s.cities {
-		normalizedCity := config.NormalizeCity(city)
+		normalized := s.normalizedMap[city]
 		s.logger.WithFields(logrus.Fields{
 			"city":            city,
-			"normalized_city": normalizedCity,
+			"normalized_city": normalized,
 			"job_type":        JobTypeActive.String(),
 		}).Info("Starting spider job")
 
-		if err := s.spiderManager.RunActiveSpider(normalizedCity, nil); err != nil {
+		if err := s.spiderManager.RunActiveSpider(normalized, nil); err != nil {
 			s.logger.WithError(err).WithFields(logrus.Fields{
 				"city":            city,
-				"normalized_city": normalizedCity,
+				"normalized_city": normalized,
 				"job_type":        JobTypeActive.String(),
 			}).Error("Spider job failed")
 		} else {
 			s.logger.WithFields(logrus.Fields{
 				"city":            city,
-				"normalized_city": normalizedCity,
+				"normalized_city": normalized,
 				"job_type":        JobTypeActive.String(),
 			}).Info("Spider job completed successfully")
 		}
@@ -164,23 +168,23 @@ func (s *Scheduler) runActiveSpiders() {
 func (s *Scheduler) runSoldSpiders() {
 	s.logger.Info("Starting sold spider run")
 	for _, city := range s.cities {
-		normalizedCity := config.NormalizeCity(city)
+		normalized := s.normalizedMap[city]
 		s.logger.WithFields(logrus.Fields{
 			"city":            city,
-			"normalized_city": normalizedCity,
+			"normalized_city": normalized,
 			"job_type":        JobTypeSold.String(),
 		}).Info("Starting spider job")
 
-		if err := s.spiderManager.RunSoldSpider(normalizedCity, nil, true); err != nil {
+		if err := s.spiderManager.RunSoldSpider(normalized, nil, true); err != nil {
 			s.logger.WithError(err).WithFields(logrus.Fields{
 				"city":            city,
-				"normalized_city": normalizedCity,
+				"normalized_city": normalized,
 				"job_type":        JobTypeSold.String(),
 			}).Error("Spider job failed")
 		} else {
 			s.logger.WithFields(logrus.Fields{
 				"city":            city,
-				"normalized_city": normalizedCity,
+				"normalized_city": normalized,
 				"job_type":        JobTypeSold.String(),
 			}).Info("Spider job completed successfully")
 		}
@@ -237,25 +241,25 @@ func (s *Scheduler) checkAndRunRefreshSpiders(t time.Time) {
 	// Check each city's schedule
 	for city, slot := range citySchedule {
 		if t.Weekday() == slot.day && t.Hour() == slot.hour {
-			normalizedCity := config.NormalizeCity(city)
+			normalized := s.normalizedMap[city]
 			s.logger.WithFields(logrus.Fields{
 				"city":            city,
-				"normalized_city": normalizedCity,
+				"normalized_city": normalized,
 				"job_type":        JobTypeRefresh.String(),
 				"day":             slot.day,
 				"hour":            slot.hour,
 			}).Info("Starting spider job")
 
-			if err := s.spiderManager.RunRefreshSpider(normalizedCity); err != nil {
+			if err := s.spiderManager.RunRefreshSpider(normalized); err != nil {
 				s.logger.WithError(err).WithFields(logrus.Fields{
 					"city":            city,
-					"normalized_city": normalizedCity,
+					"normalized_city": normalized,
 					"job_type":        JobTypeRefresh.String(),
 				}).Error("Spider job failed")
 			} else {
 				s.logger.WithFields(logrus.Fields{
 					"city":            city,
-					"normalized_city": normalizedCity,
+					"normalized_city": normalized,
 					"job_type":        JobTypeRefresh.String(),
 				}).Info("Spider job completed successfully")
 			}
@@ -267,49 +271,4 @@ func (s *Scheduler) checkAndRunRefreshSpiders(t time.Time) {
 func (s *Scheduler) Stop() {
 	close(s.stopChan)
 	s.wg.Wait()
-}
-
-func (s *Scheduler) startSpiderForCity(city string) error {
-	normalizedCity := config.NormalizeCity(city)
-	s.logger.Infof("Starting spider for city: %s (normalized: %s)", city, normalizedCity)
-
-	// Create spider command with normalized city name
-	cmd := exec.Command("python3", "server/scripts/run_spider.py")
-	cmd.Stdin = strings.NewReader(fmt.Sprintf(`{"spider_type": "active", "place": "%s", "original_city": "%s"}`, normalizedCity, city))
-
-	// Set up pipes for stdout and stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %v", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %v", err)
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start spider: %v", err)
-	}
-
-	// Handle output in goroutines
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			s.logger.Info(scanner.Text())
-		}
-	}()
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			s.logger.Error(scanner.Text())
-		}
-	}()
-
-	// Wait for the command to complete
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("spider failed: %v", err)
-	}
-
-	return nil
 }

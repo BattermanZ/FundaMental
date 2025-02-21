@@ -7,42 +7,44 @@ from datetime import datetime
 import urllib.parse
 import os
 import pickle
-import logging
 
 class FundaSpider(scrapy.Spider):
     name = "funda_spider"
     allowed_domains = ["funda.nl"]
     
-    # Only override settings that are specific to this spider
     custom_settings = {
-        'HTTPCACHE_ENABLED': False  # Disable caching for active listings to ensure freshness'
+        'DOWNLOAD_DELAY': 2,
+        'CONCURRENT_REQUESTS': 2,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
+        'AUTOTHROTTLE_ENABLED': True,
+        'AUTOTHROTTLE_START_DELAY': 2,
+        'AUTOTHROTTLE_MAX_DELAY': 30,
+        'AUTOTHROTTLE_TARGET_CONCURRENCY': 2.0,
+        'DOWNLOAD_TIMEOUT': 30,
+        'ITEM_PIPELINES': {
+            'spiders.pipelines.TestPipeline': 300,
+            'spiders.pipelines.JsonExportPipeline': 500,
+        }
     }
 
     def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
-        super(FundaSpider, self).__init__(*args, **kwargs)
-        self.place = place.lower()  # Ensure lowercase for consistency
-        self.original_city = kwargs.get('original_city', place)
+        super().__init__(*args, **kwargs)
+        self.place = place
         self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
-        self.processed_urls = set()  # Track processed URLs in current run
+        self.processed_urls = set()
         self.total_items_scraped = 0
-        self.new_items_found = 0  # Track new items found
+        self.new_items_found = 0
         self.active_urls = set()  # Track all active URLs for refresh operation
-        self.buffer = []
-        self.buffer_size = 100  # Configurable batch size
-        self.logger = logging.getLogger(__name__)
         
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
         os.makedirs(self.state_dir, exist_ok=True)
-        self.state_file = os.path.join(self.state_dir, f'funda_active_{self.place}_state.pkl')
-        
-        # Log city information
-        self.logger.info(f"Spider initialized for city: {self.original_city} (normalized: {self.place})")
+        self.state_file = os.path.join(self.state_dir, f'funda_active_{place}_state.pkl')
         
         # Base parameters for the search
         self.base_params = {
-            'selected_area': json.dumps([self.place]),
+            'selected_area': json.dumps([place]),
             'availability': json.dumps(['available']),
             'object_type': json.dumps(['house', 'apartment']),
             'sort': 'date_down'  # Most recent first
@@ -65,9 +67,6 @@ class FundaSpider(scrapy.Spider):
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"macOS"'
         }
-
-        self.state = {}
-        self.load_state()
 
     def save_state(self):
         """Save current spider state for resuming later."""
@@ -143,7 +142,7 @@ class FundaSpider(scrapy.Spider):
             self.processed_urls.add(url)
             yield scrapy.Request(
                 url,
-                callback=self.parse_property,
+                callback=self.parse_house,
                 headers=self.headers,
                 meta={'dont_cache': True}
             )
@@ -181,35 +180,7 @@ class FundaSpider(scrapy.Spider):
         else:
             self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
 
-    def parse_property(self, response):
-        # Check if we're being blocked
-        if response.status == 403 or "Je bent bijna op de pagina die je zoekt" in response.text:
-            self.logger.error(f"Blocked or verification required for URL: {response.url}")
-            return
-
-        item = self.extract_property_data(response)
-        if item:
-            self.total_items_scraped += 1
-            self.buffer.append(item)
-            
-            # Log progress every 10 items
-            if self.total_items_scraped % 10 == 0:
-                self.logger.info(f"Scraped {self.total_items_scraped} properties. Buffer size: {len(self.buffer)}")
-            
-            # If buffer is full, yield the batch
-            if len(self.buffer) >= self.buffer_size:
-                self.logger.info(f"Buffer full ({len(self.buffer)} items). Yielding batch...")
-                batch = {
-                    'type': 'properties_batch',
-                    'items': self.buffer.copy(),
-                    'timestamp': datetime.now().isoformat(),
-                    'spider': self.name,
-                    'city': self.place
-                }
-                self.buffer = []
-                yield batch
-
-    def extract_property_data(self, response):
+    def parse_house(self, response):
         # Check if we're being blocked
         if response.status == 403 or "Je bent bijna op de pagina die je zoekt" in response.text:
             self.logger.error(f"Blocked or verification required for URL: {response.url}")
@@ -456,6 +427,7 @@ class FundaSpider(scrapy.Spider):
         # Add scraped timestamp
         item['scraped_at'] = datetime.utcnow().isoformat()
 
+        self.total_items_scraped += 1
         if self.total_items_scraped % 10 == 0:  # Log progress every 10 items
             self.logger.info(f"Progress: Scraped {self.total_items_scraped} items from {self.page_count}")
         
@@ -549,17 +521,4 @@ class FundaSpider(scrapy.Spider):
         self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}")
         
         # Save final state
-        self.save_state()
-        
-        # Ensure any remaining items in buffer are processed when spider closes
-        if self.buffer:
-            self.logger.info(f"Flushing remaining {len(self.buffer)} properties on spider close")
-            batch = {
-                'type': 'properties_batch',
-                'items': self.buffer.copy(),
-                'timestamp': datetime.now().isoformat(),
-                'spider': self.name,
-                'city': self.place
-            }
-            self.buffer = []
-            yield batch 
+        self.save_state() 

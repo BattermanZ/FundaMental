@@ -57,6 +57,7 @@ func main() {
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to get city names for scheduler")
 	}
+	// Note: GetCityNames returns normalized city names suitable for Funda URLs
 	scheduler := scheduler.NewScheduler(spiderManager, logger, cityNames)
 
 	// Start scheduler

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"gorm.io/gorm"
 )
 
 type Database struct {
@@ -1452,80 +1451,6 @@ func (d *Database) UpdateTelegramFilters(filters *models.TelegramFilters) error 
 
 	if err != nil {
 		return fmt.Errorf("failed to update telegram filters: %v", err)
-	}
-
-	return nil
-}
-
-// UpsertProperty updates or inserts a single property
-func UpsertProperty(tx *gorm.DB, property *models.Property) error {
-	result := tx.Model(&models.Property{}).
-		Where("id = ?", property.ID).
-		Updates(property)
-
-	if result.RowsAffected == 0 {
-		if err := tx.Create(property).Error; err != nil {
-			return fmt.Errorf("failed to create property: %w", err)
-		}
-	} else if result.Error != nil {
-		return fmt.Errorf("failed to update property: %w", result.Error)
-	}
-
-	return nil
-}
-
-// UpsertProperties performs a batch upsert of properties
-func UpsertProperties(tx *gorm.DB, properties []*models.Property) error {
-	if len(properties) == 0 {
-		return nil
-	}
-
-	// Group properties by whether they need to be created or updated
-	existingIDs := make([]int64, len(properties))
-	for i, p := range properties {
-		existingIDs[i] = p.ID
-	}
-
-	existing := make(map[int64]bool)
-	var rows []models.Property
-	result := tx.Model(&models.Property{}).
-		Where("id IN ?", existingIDs).
-		Find(&rows)
-
-	if result.Error != nil {
-		return fmt.Errorf("failed to query existing properties: %w", result.Error)
-	}
-
-	for _, row := range rows {
-		existing[row.ID] = true
-	}
-
-	// Separate properties into updates and creates
-	var toCreate, toUpdate []*models.Property
-	for _, p := range properties {
-		if existing[p.ID] {
-			toUpdate = append(toUpdate, p)
-		} else {
-			toCreate = append(toCreate, p)
-		}
-	}
-
-	// Perform batch create
-	if len(toCreate) > 0 {
-		if err := tx.Create(toCreate).Error; err != nil {
-			return fmt.Errorf("failed to batch create properties: %w", err)
-		}
-	}
-
-	// Perform batch updates
-	for _, p := range toUpdate {
-		// Use individual updates for now as GORM doesn't support bulk updates
-		// without potentially overwriting data
-		if err := tx.Model(&models.Property{}).
-			Where("id = ?", p.ID).
-			Updates(p).Error; err != nil {
-			return fmt.Errorf("failed to update property %d: %w", p.ID, err)
-		}
 	}
 
 	return nil

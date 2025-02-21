@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -241,39 +242,54 @@ func (h *Handler) GetTelegramConfig(c *gin.Context) {
 // UpdateTelegramConfig updates the Telegram configuration
 func (h *Handler) UpdateTelegramConfig(c *gin.Context) {
 	var request models.TelegramConfigRequest
-
 	if err := c.ShouldBindJSON(&request); err != nil {
+		h.logger.WithError(err).Error("Invalid request body")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Basic validation
+	if len(request.BotToken) < 20 || !strings.Contains(request.BotToken, ":") {
+		h.logger.Error("Invalid bot token format")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid bot token format. Please check your bot token from @BotFather"})
+		return
+	}
+
+	if request.ChatID == "" {
+		h.logger.Error("Chat ID is required")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Chat ID is required"})
+		return
+	}
+
+	// Test the Telegram configuration before saving
+	testService := telegram.NewService(h.logger)
+	testConfig := &models.TelegramConfig{
+		BotToken:  request.BotToken,
+		ChatID:    request.ChatID,
+		IsEnabled: true,
+	}
+	testService.UpdateConfig(testConfig)
+
+	testMessage := "🔔 Test notification from FundaMental\n\nIf you see this message, your Telegram configuration is working correctly!"
+	if err := testService.SendMessage(testMessage); err != nil {
+		h.logger.WithError(err).Error("Failed to send test message")
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Get existing config
-	currentConfig, err := h.db.GetTelegramConfig()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get current configuration"})
-		return
-	}
-
-	// Only update fields that are provided
-	if request.BotToken != "" {
-		currentConfig.BotToken = request.BotToken
-	}
-	if request.ChatID != "" {
-		currentConfig.ChatID = request.ChatID
-	}
-	// Always update IsEnabled as it's a boolean
-	currentConfig.IsEnabled = request.IsEnabled
-
-	// Update the configuration
+	// Save the configuration
 	if err := h.db.UpdateTelegramConfig(&request); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update configuration"})
+		h.logger.WithError(err).Error("Failed to update Telegram config")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save configuration to database"})
 		return
 	}
 
-	// Update the telegram service configuration
-	h.telegramService.UpdateConfig(currentConfig)
+	// Update the service configuration
+	if config, err := h.db.GetTelegramConfig(); err == nil && config != nil {
+		h.telegramService.UpdateConfig(config)
+	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Configuration updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Telegram configuration updated successfully"})
 }
 
 // GetTelegramFilters returns the current notification filters
