@@ -60,9 +60,9 @@ func main() {
 	// Note: GetCityNames returns normalized city names suitable for Funda URLs
 	scheduler := scheduler.NewScheduler(spiderManager, logger, cityNames)
 
-	// Start scheduler
-	scheduler.Start()
-	logger.Info("Started scheduler for automated scraping")
+	// Comment out scheduler auto-start - uncomment when needed
+	// scheduler.Start()
+	// logger.Info("Started scheduler for automated scraping")
 
 	// Start geocoding in a background goroutine
 	go func() {
