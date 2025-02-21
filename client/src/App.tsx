@@ -158,9 +158,6 @@ const ConfigPage = () => (
         </StyledSection>
 
         <StyledSection>
-            <Typography variant="h4" gutterBottom>
-                Notifications
-            </Typography>
             <TelegramConfig />
         </StyledSection>
     </>
