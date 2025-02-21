@@ -1,5 +1,5 @@
 import React, { useState, createContext, useContext, useEffect } from 'react';
-import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab, Paper, Stack, Alert } from '@mui/material';
+import { Container, Typography, AppBar, Toolbar, Box, Tabs, Tab, Paper, Stack, Alert, Button, CircularProgress } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { LocalizationProvider } from '@mui/x-date-pickers';
@@ -7,6 +7,7 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import { api } from './services/api';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import PropertyMap from './components/PropertyMap';
 import PropertyStats from './components/PropertyStats';
 import PropertyCharts from './components/PropertyCharts';
@@ -148,20 +149,56 @@ const AnalyticsPage = () => {
     );
 };
 
-const ConfigPage = () => (
-    <>
-        <StyledSection>
-            <Typography variant="h4" gutterBottom>
-                Metropolitan Area Configuration
-            </Typography>
-            <MetropolitanAreaList />
-        </StyledSection>
+const ConfigPage = () => {
+    const [isUpdating, setIsUpdating] = useState(false);
 
-        <StyledSection>
-            <TelegramConfig />
-        </StyledSection>
-    </>
-);
+    const handleUpdate = async () => {
+        try {
+            setIsUpdating(true);
+            // Run active spider first
+            await api.runSpider({ type: 'active' });
+            // Then run sold spider
+            await api.runSpider({ type: 'sold', resume: true });
+            alert('Update started successfully. This may take several hours to complete.');
+        } catch (error: any) {
+            console.error('Failed to start update:', error);
+            if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+                // This is likely a timeout but the operation probably started
+                alert('The request timed out, but the update likely started successfully. This process will continue in the background and may take several hours to complete.');
+            } else {
+                alert('Failed to start update: ' + (error.message || 'Unknown error'));
+            }
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    return (
+        <>
+            <StyledSection>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h4">
+                        Metropolitan Area Configuration
+                    </Typography>
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={handleUpdate}
+                        disabled={isUpdating}
+                        startIcon={isUpdating ? <CircularProgress size={20} /> : <RefreshIcon />}
+                    >
+                        {isUpdating ? 'Updating...' : 'Update Properties'}
+                    </Button>
+                </Box>
+                <MetropolitanAreaList />
+            </StyledSection>
+
+            <StyledSection>
+                <TelegramConfig />
+            </StyledSection>
+        </>
+    );
+};
 
 // Navigation component
 const Navigation = () => {

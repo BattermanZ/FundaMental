@@ -117,5 +117,15 @@ export const api = {
             throw new Error('Failed to check initial setup');
         }
         return response.json();
+    },
+
+    runSpider: async (params: { type: 'active' | 'sold', resume?: boolean }) => {
+        const endpoint = `/spiders/${params.type}`;
+        const response = await axiosInstance.post(endpoint, {
+            resume: params.resume
+        }, {
+            timeout: 30000 // Increase timeout to 30 seconds for spider operations
+        });
+        return response.data;
     }
 }; 
