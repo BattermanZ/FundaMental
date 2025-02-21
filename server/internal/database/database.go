@@ -385,8 +385,55 @@ func (d *Database) Close() error {
 }
 
 func (d *Database) RunMigrations() error {
-	// Create metropolitan areas table
+	// Create properties table first
 	_, err := d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS properties (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			url TEXT UNIQUE NOT NULL,
+			street TEXT,
+			neighborhood TEXT,
+			property_type TEXT,
+			city TEXT,
+			postal_code TEXT,
+			price INTEGER,
+			year_built INTEGER,
+			living_area INTEGER,
+			num_rooms INTEGER,
+			status TEXT,
+			listing_date TEXT,
+			selling_date TEXT,
+			scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			energy_label TEXT,
+			republish_count INTEGER DEFAULT 0,
+			latitude REAL,
+			longitude REAL,
+			geocoding_attempted BOOLEAN DEFAULT 0
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create properties table: %v", err)
+	}
+
+	// Create property_history table
+	_, err = d.db.Exec(`
+		CREATE TABLE IF NOT EXISTS property_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			property_id INTEGER NOT NULL,
+			status TEXT,
+			price INTEGER,
+			listing_date TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (property_id) REFERENCES properties(id)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create property_history table: %v", err)
+	}
+
+	// Create metropolitan areas table
+	_, err = d.db.Exec(`
 		CREATE TABLE IF NOT EXISTS metropolitan_areas (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT UNIQUE NOT NULL,
