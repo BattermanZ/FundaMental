@@ -119,10 +119,11 @@ export const api = {
         return response.json();
     },
 
-    runSpider: async (params: { type: 'active' | 'sold', resume?: boolean }) => {
+    runSpider: async (params: { type: 'active' | 'sold', resume?: boolean, queueSold?: boolean }) => {
         const endpoint = `/spiders/${params.type}`;
         const response = await axiosInstance.post(endpoint, {
-            resume: params.resume
+            resume: params.resume,
+            queue_sold: params.queueSold
         }, {
             timeout: 30000 // Increase timeout to 30 seconds for spider operations
         });

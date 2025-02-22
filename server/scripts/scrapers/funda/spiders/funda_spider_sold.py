@@ -31,7 +31,7 @@ class FundaSpiderSold(scrapy.Spider):
     def __init__(self, place='amsterdam', max_pages=None, resume=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.place = place
-        self.max_pages = int(max_pages) if max_pages else None  # Remove default of 200 pages
+        self.max_pages = int(max_pages) if max_pages else None
         self.page_count = 1
         self.processed_urls = set()  # Track processed URLs in current run
         self.total_items_scraped = 0
@@ -40,8 +40,8 @@ class FundaSpiderSold(scrapy.Spider):
         
         # Initialize database connection for URL checking
         self.db = FundaDB()
-        self.existing_urls = self.db.get_sold_urls()  # Get only sold URLs from DB
-        self.logger.info(f"Found {len(self.existing_urls)} existing sold URLs in database")
+        self.existing_urls = self.db.get_all_active_urls()  # Get all URLs from DB to avoid duplicates
+        self.logger.info(f"Found {len(self.existing_urls)} existing URLs in database")
         
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
@@ -118,7 +118,7 @@ class FundaSpiderSold(scrapy.Spider):
             )
 
     def parse(self, response):
-        self.logger.info(f"Parsing page {self.page_count} of max {self.max_pages}")
+        self.logger.info(f"Parsing page {self.page_count}")
         
         # Check if we're being blocked or redirected
         if response.status in [403, 302, 503]:
@@ -153,19 +153,14 @@ class FundaSpiderSold(scrapy.Spider):
 
         # Now filter out existing URLs
         new_listing_urls = {url for url in all_listing_urls 
-                          if url not in self.processed_urls and url not in self.existing_urls}
+                          if url not in self.processed_urls}
         
-        # If we found no new listings on this page, stop crawling
-        if not new_listing_urls:
-            self.logger.info(f"No new listings found on page {self.page_count}, all URLs already exist in database. Stopping crawl.")
-            return
-
         # Log stats about new vs existing URLs
         self.logger.info(f"Found {len(all_listing_urls)} total listings on page {self.page_count}")
         self.logger.info(f"Found {len(new_listing_urls)} new listings to process")
         self.new_items_found += len(new_listing_urls)
         
-        # Process only new listings
+        # Process new listings (even if we've seen them before)
         for url in new_listing_urls:
             self.processed_urls.add(url)
             yield scrapy.Request(
@@ -179,7 +174,7 @@ class FundaSpiderSold(scrapy.Spider):
         self.save_state()
         
         # Handle pagination if we haven't reached max_pages
-        if self.page_count < self.max_pages:
+        if not self.max_pages or self.page_count < self.max_pages:
             # Look for next page button
             next_page = response.css('a[data-test-id="next-page-button"]::attr(href)').get()
             if next_page:

@@ -155,15 +155,11 @@ const ConfigPage = () => {
     const handleUpdate = async () => {
         try {
             setIsUpdating(true);
-            // Run active spider first
-            await api.runSpider({ type: 'active' });
-            // Then run sold spider
-            await api.runSpider({ type: 'sold', resume: true });
-            alert('Update started successfully. This may take several hours to complete.');
+            await api.runSpider({ type: 'active', queueSold: true });
+            alert('Update started successfully. Active and sold properties will be updated sequentially. This may take several hours to complete.');
         } catch (error: any) {
-            console.error('Failed to start update:', error);
+            console.error('Spider error:', error);
             if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-                // This is likely a timeout but the operation probably started
                 alert('The request timed out, but the update likely started successfully. This process will continue in the background and may take several hours to complete.');
             } else {
                 alert('Failed to start update: ' + (error.message || 'Unknown error'));

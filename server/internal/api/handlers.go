@@ -34,9 +34,10 @@ type DateRange struct {
 }
 
 type SpiderRequest struct {
-	Place    string `json:"place" binding:"required"`
-	MaxPages *int   `json:"max_pages"`
-	Resume   bool   `json:"resume"`
+	Place     string `json:"place" binding:"required"`
+	MaxPages  *int   `json:"max_pages"`
+	Resume    bool   `json:"resume"`
+	QueueSold bool   `json:"queue_sold"`
 }
 
 func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
@@ -188,33 +189,65 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 		// Start spider for each configured city
 		for _, city := range cities {
 			normalizedCity := config.NormalizeCity(city)
-			err := h.spiderManager.RunActiveSpider(normalizedCity, nil)
-			if err != nil {
-				h.logger.WithError(err).WithField("city", city).Error("Failed to run active spider")
-				// Continue with other cities even if one fails
-				continue
-			}
-			h.logger.WithField("city", city).Info("Started active spider successfully")
+			// Start active spider
+			go func(city string) {
+				err := h.spiderManager.RunActiveSpider(city, nil)
+				if err != nil {
+					h.logger.WithError(err).WithField("city", city).Error("Failed to run active spider")
+					return
+				}
+				h.logger.WithField("city", city).Info("Active spider completed successfully")
+
+				// Queue sold spider only if requested
+				if req.QueueSold {
+					err = h.spiderManager.RunSoldSpider(city, nil, true)
+					if err != nil {
+						h.logger.WithError(err).WithField("city", city).Error("Failed to run sold spider")
+						return
+					}
+					h.logger.WithField("city", city).Info("Sold spider queued successfully")
+				}
+			}(normalizedCity)
 		}
 
+		message := "Active spiders started for all configured cities"
+		if req.QueueSold {
+			message = "Active spiders started and sold spiders queued for all configured cities"
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",
-			"message": "Active spiders started for all configured cities",
+			"message": message,
 		})
 		return
 	}
 
 	// If parameters were provided, use them
-	err := h.spiderManager.RunActiveSpider(req.Place, req.MaxPages)
-	if err != nil {
-		h.logger.WithError(err).Error("Failed to run active spider")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to run spider"})
-		return
-	}
+	go func() {
+		err := h.spiderManager.RunActiveSpider(req.Place, req.MaxPages)
+		if err != nil {
+			h.logger.WithError(err).Error("Failed to run active spider")
+			return
+		}
+		h.logger.WithField("place", req.Place).Info("Active spider completed successfully")
 
+		// Queue sold spider only if requested
+		if req.QueueSold {
+			err = h.spiderManager.RunSoldSpider(req.Place, req.MaxPages, true)
+			if err != nil {
+				h.logger.WithError(err).Error("Failed to run sold spider")
+				return
+			}
+			h.logger.WithField("place", req.Place).Info("Sold spider queued successfully")
+		}
+	}()
+
+	message := "Active spider started successfully"
+	if req.QueueSold {
+		message = "Active spider started and sold spider queued successfully"
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"message": "Active spider started successfully",
+		"message": message,
 	})
 }
 
