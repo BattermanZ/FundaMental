@@ -2,7 +2,7 @@ import re
 import scrapy
 from scrapy.http import Request
 from scrapers.funda.items import FundaItem
-from scrapers.funda.database import FundaDB  # Import the database module
+from scrapers.funda.database import FundaDB
 import json
 from datetime import datetime
 import urllib.parse
@@ -35,13 +35,13 @@ class FundaSpiderSold(scrapy.Spider):
         self.page_count = 1
         self.processed_urls = set()  # Track processed URLs in current run
         self.total_items_scraped = 0
-        self.new_items_found = 0  # Track new items found
+        self.new_items_found = 0
         self.resume = resume
+        self.empty_pages_count = 0  # Track consecutive empty pages
+        self.MAX_EMPTY_PAGES = 3  # Stop after this many consecutive empty pages
         
-        # Initialize database connection for URL checking
+        # Initialize database connection
         self.db = FundaDB()
-        self.existing_urls = self.db.get_all_active_urls()  # Get all URLs from DB to avoid duplicates
-        self.logger.info(f"Found {len(self.existing_urls)} existing URLs in database")
         
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
@@ -151,16 +151,26 @@ class FundaSpiderSold(scrapy.Spider):
                 full_url = response.urljoin(url)
                 all_listing_urls.add(full_url)
 
-        # Now filter out existing URLs
+        # Process all found URLs that haven't been processed in this run
         new_listing_urls = {url for url in all_listing_urls 
                           if url not in self.processed_urls}
         
         # Log stats about new vs existing URLs
         self.logger.info(f"Found {len(all_listing_urls)} total listings on page {self.page_count}")
         self.logger.info(f"Found {len(new_listing_urls)} new listings to process")
-        self.new_items_found += len(new_listing_urls)
         
-        # Process new listings (even if we've seen them before)
+        # Update empty pages counter
+        if len(all_listing_urls) == 0:
+            self.empty_pages_count += 1
+            self.logger.info(f"Empty page detected. Empty pages count: {self.empty_pages_count}")
+            if self.empty_pages_count >= self.MAX_EMPTY_PAGES:
+                self.logger.info(f"Stopping after {self.MAX_EMPTY_PAGES} consecutive empty pages")
+                return
+        else:
+            self.empty_pages_count = 0  # Reset counter when we find listings
+            self.new_items_found += len(new_listing_urls)
+        
+        # Process all listings
         for url in new_listing_urls:
             self.processed_urls.add(url)
             yield scrapy.Request(
@@ -173,8 +183,8 @@ class FundaSpiderSold(scrapy.Spider):
         # Save state after processing each page
         self.save_state()
         
-        # Handle pagination if we haven't reached max_pages
-        if not self.max_pages or self.page_count < self.max_pages:
+        # Handle pagination if we haven't reached max_pages and haven't hit empty pages limit
+        if (not self.max_pages or self.page_count < self.max_pages) and self.empty_pages_count < self.MAX_EMPTY_PAGES:
             # Look for next page button
             next_page = response.css('a[data-test-id="next-page-button"]::attr(href)').get()
             if next_page:
@@ -201,7 +211,10 @@ class FundaSpiderSold(scrapy.Spider):
                     meta={'dont_cache': True}
                 )
         else:
-            self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
+            if self.max_pages and self.page_count >= self.max_pages:
+                self.logger.info(f"Reached maximum number of pages ({self.max_pages}). Stopping.")
+            elif self.empty_pages_count >= self.MAX_EMPTY_PAGES:
+                self.logger.info(f"Stopping after {self.MAX_EMPTY_PAGES} consecutive empty pages")
 
     def parse_listing(self, response):
         self.logger.info(f"Parsing listing page: {response.url}")
