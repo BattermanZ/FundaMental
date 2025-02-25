@@ -186,33 +186,37 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 			return
 		}
 
-		// Start spider for each configured city
-		for _, city := range cities {
-			normalizedCity := config.NormalizeCity(city)
-			// Start active spider
-			go func(city string) {
-				err := h.spiderManager.RunActiveSpider(city, nil)
+		// Start a single goroutine that processes all cities sequentially
+		go func() {
+			for _, city := range cities {
+				normalizedCity := config.NormalizeCity(city)
+
+				// Process active spider for this city
+				h.logger.WithField("city", normalizedCity).Info("Starting active spider")
+				err := h.spiderManager.RunActiveSpider(normalizedCity, nil)
 				if err != nil {
-					h.logger.WithError(err).WithField("city", city).Error("Failed to run active spider")
-					return
+					h.logger.WithError(err).WithField("city", normalizedCity).Error("Failed to run active spider")
+					continue // Continue with next city even if this one fails
 				}
-				h.logger.WithField("city", city).Info("Active spider completed successfully")
+				h.logger.WithField("city", normalizedCity).Info("Active spider completed successfully")
 
 				// Queue sold spider only if requested
 				if req.QueueSold {
-					err = h.spiderManager.RunSoldSpider(city, nil, true)
+					h.logger.WithField("city", normalizedCity).Info("Starting sold spider")
+					err = h.spiderManager.RunSoldSpider(normalizedCity, nil, true)
 					if err != nil {
-						h.logger.WithError(err).WithField("city", city).Error("Failed to run sold spider")
-						return
+						h.logger.WithError(err).WithField("city", normalizedCity).Error("Failed to run sold spider")
+						continue
 					}
-					h.logger.WithField("city", city).Info("Sold spider queued successfully")
+					h.logger.WithField("city", normalizedCity).Info("Sold spider completed successfully")
 				}
-			}(normalizedCity)
-		}
+			}
+			h.logger.Info("All city spiders have completed")
+		}()
 
-		message := "Active spiders started for all configured cities"
+		message := "Spider process started. Cities will be processed sequentially."
 		if req.QueueSold {
-			message = "Active spiders started and sold spiders queued for all configured cities"
+			message = "Spider process started. For each city, active properties will be processed first, followed by sold properties."
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",
@@ -221,33 +225,24 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 		return
 	}
 
-	// If parameters were provided, use them
+	// If a specific place was provided, just process that one
 	go func() {
-		err := h.spiderManager.RunActiveSpider(req.Place, req.MaxPages)
+		err := h.spiderManager.RunActiveSpider(req.Place, nil)
 		if err != nil {
 			h.logger.WithError(err).Error("Failed to run active spider")
 			return
 		}
-		h.logger.WithField("place", req.Place).Info("Active spider completed successfully")
 
-		// Queue sold spider only if requested
 		if req.QueueSold {
-			err = h.spiderManager.RunSoldSpider(req.Place, req.MaxPages, true)
-			if err != nil {
+			h.logger.Info("Active spider completed, starting sold spider")
+			if err := h.spiderManager.RunSoldSpider(req.Place, nil, false); err != nil {
 				h.logger.WithError(err).Error("Failed to run sold spider")
-				return
 			}
-			h.logger.WithField("place", req.Place).Info("Sold spider queued successfully")
 		}
 	}()
 
-	message := "Active spider started successfully"
-	if req.QueueSold {
-		message = "Active spider started and sold spider queued successfully"
-	}
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": message,
+		"status": "Spider started",
 	})
 }
 
@@ -262,32 +257,39 @@ func (h *Handler) RunSoldSpider(c *gin.Context) {
 			return
 		}
 
-		// Start spider for each configured city
-		for _, city := range cities {
-			normalizedCity := config.NormalizeCity(city)
-			err := h.spiderManager.RunSoldSpider(normalizedCity, nil, req.Resume)
-			if err != nil {
-				h.logger.WithError(err).WithField("city", city).Error("Failed to run sold spider")
-				// Continue with other cities even if one fails
-				continue
+		// Start a single goroutine that processes all cities sequentially
+		go func() {
+			for _, city := range cities {
+				normalizedCity := config.NormalizeCity(city)
+				
+				h.logger.WithField("city", normalizedCity).Info("Starting sold spider")
+				err := h.spiderManager.RunSoldSpider(normalizedCity, nil, req.Resume)
+				if err != nil {
+					h.logger.WithError(err).WithField("city", normalizedCity).Error("Failed to run sold spider")
+					continue // Continue with next city even if this one fails
+				}
+				h.logger.WithField("city", normalizedCity).Info("Sold spider completed successfully")
 			}
-			h.logger.WithField("city", city).Info("Started sold spider successfully")
-		}
+			h.logger.Info("All city sold spiders have completed")
+		}()
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",
-			"message": "Sold spiders started for all configured cities",
+			"message": "Sold spider process started. Cities will be processed sequentially.",
 		})
 		return
 	}
 
 	// If parameters were provided, use them
-	err := h.spiderManager.RunSoldSpider(req.Place, req.MaxPages, req.Resume)
-	if err != nil {
-		h.logger.WithError(err).Error("Failed to run sold spider")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to run spider"})
-		return
-	}
+	go func() {
+		h.logger.WithField("place", req.Place).Info("Starting sold spider")
+		err := h.spiderManager.RunSoldSpider(req.Place, req.MaxPages, req.Resume)
+		if err != nil {
+			h.logger.WithError(err).WithField("place", req.Place).Error("Failed to run sold spider")
+			return
+		}
+		h.logger.WithField("place", req.Place).Info("Sold spider completed successfully")
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
