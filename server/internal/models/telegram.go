@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/sirupsen/logrus"
+)
 
 // TelegramConfig stores the bot credentials and basic settings
 type TelegramConfig struct {
@@ -48,12 +52,27 @@ func (f *TelegramFilters) IsPropertyAllowed(property *Property) bool {
 	// Check living area range
 	if property.LivingArea != nil {
 		if f.MinLivingArea != nil && (*property.LivingArea < *f.MinLivingArea) {
+			logrus.WithFields(logrus.Fields{
+				"property_living_area": *property.LivingArea,
+				"min_living_area":      *f.MinLivingArea,
+				"postal_code":          property.PostalCode,
+			}).Debug("Property rejected due to living area below minimum")
 			return false
 		}
 		if f.MaxLivingArea != nil && (*property.LivingArea > *f.MaxLivingArea) {
+			logrus.WithFields(logrus.Fields{
+				"property_living_area": *property.LivingArea,
+				"max_living_area":      *f.MaxLivingArea,
+				"postal_code":          property.PostalCode,
+			}).Debug("Property rejected due to living area above maximum")
 			return false
 		}
 	} else if f.MinLivingArea != nil || f.MaxLivingArea != nil {
+		logrus.WithFields(logrus.Fields{
+			"postal_code":     property.PostalCode,
+			"min_living_area": f.MinLivingArea,
+			"max_living_area": f.MaxLivingArea,
+		}).Debug("Property rejected due to missing living area")
 		return false // Filter requires living area but property has none
 	}
 

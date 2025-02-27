@@ -802,7 +802,7 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 					postal_code = ?,
 					price = ?,
 					year_built = ?,
-					living_area = ?,
+					living_area = CASE WHEN CAST(? AS INTEGER) > 0 THEN CAST(? AS INTEGER) ELSE NULL END,
 					num_rooms = ?,
 					status = ?,
 					listing_date = ?,
@@ -819,7 +819,7 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 				prop["postal_code"],
 				prop["price"],
 				prop["year_built"],
-				prop["living_area"],
+				prop["living_area"], prop["living_area"], // Pass living_area twice for the CASE statement
 				prop["num_rooms"],
 				prop["status"],
 				prop["listing_date"],
@@ -855,7 +855,9 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 				(url, street, neighborhood, property_type, city, postal_code, 
 				 price, year_built, living_area, num_rooms, status, 
 				 listing_date, selling_date, scraped_at, republish_count, energy_label)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, 
+				 CASE WHEN CAST(? AS INTEGER) > 0 THEN CAST(? AS INTEGER) ELSE NULL END,
+				 ?, ?, ?, ?, ?, ?, ?)
 			`,
 				prop["url"],
 				prop["street"],
@@ -865,7 +867,7 @@ func (d *Database) InsertProperties(properties []map[string]interface{}) ([]map[
 				prop["postal_code"],
 				prop["price"],
 				prop["year_built"],
-				prop["living_area"],
+				prop["living_area"], prop["living_area"], // Pass living_area twice for the CASE statement
 				prop["num_rooms"],
 				prop["status"],
 				prop["listing_date"],

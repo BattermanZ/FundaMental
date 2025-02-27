@@ -44,7 +44,19 @@ func (s *Service) SetDatabase(db *database.Database) {
 	s.db = db
 	// Load filters from database
 	if filters, err := db.GetTelegramFilters(); err == nil {
+		s.logger.WithFields(logrus.Fields{
+			"min_living_area": filters.MinLivingArea,
+			"max_living_area": filters.MaxLivingArea,
+			"min_price":       filters.MinPrice,
+			"max_price":       filters.MaxPrice,
+			"min_rooms":       filters.MinRooms,
+			"max_rooms":       filters.MaxRooms,
+			"districts":       filters.Districts,
+			"energy_labels":   filters.EnergyLabels,
+		}).Info("Loaded telegram filters from database")
 		s.filters = filters
+	} else {
+		s.logger.WithError(err).Error("Failed to load telegram filters")
 	}
 }
 
@@ -196,6 +208,16 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 		return errors.New("Telegram chat ID is not configured")
 	}
 
+	// Ensure filters are loaded
+	if s.filters == nil && s.db != nil {
+		if filters, err := s.db.GetTelegramFilters(); err == nil {
+			s.logger.Info("Loading telegram filters before property check")
+			s.filters = filters
+		} else {
+			s.logger.WithError(err).Error("Failed to load telegram filters")
+		}
+	}
+
 	// Convert property map to Property struct for filter checking
 	prop := &models.Property{
 		Price:      int(property["price"].(float64)),
@@ -206,19 +228,51 @@ func (s *Service) NotifyNewProperty(property map[string]interface{}) error {
 	if energyLabel, ok := property["energy_label"].(string); ok {
 		prop.EnergyLabel = energyLabel
 	}
-	if la, ok := property["living_area"].(float64); ok {
+	if la, ok := property["living_area"].(float64); ok && la > 0 {
 		livingArea := int(la)
 		prop.LivingArea = &livingArea
+		s.logger.WithFields(logrus.Fields{
+			"url":             property["url"],
+			"living_area":     *prop.LivingArea,
+			"min_living_area": s.filters.MinLivingArea,
+		}).Debug("Living area check")
+	} else {
+		s.logger.WithFields(logrus.Fields{
+			"url":         property["url"],
+			"living_area": property["living_area"],
+		}).Debug("Invalid living area")
 	}
 	if nr, ok := property["num_rooms"].(float64); ok {
 		numRooms := int(nr)
 		prop.NumRooms = &numRooms
+		s.logger.WithFields(logrus.Fields{
+			"url":       property["url"],
+			"num_rooms": *prop.NumRooms,
+			"min_rooms": s.filters.MinRooms,
+		}).Debug("Room count check")
+	} else {
+		s.logger.WithFields(logrus.Fields{
+			"url":       property["url"],
+			"num_rooms": property["num_rooms"],
+		}).Debug("Invalid room count")
 	}
 
 	// Check if property matches filters
-	if s.filters != nil && !s.filters.IsPropertyAllowed(prop) {
-		s.logger.Info("Property filtered out by notification filters")
-		return nil
+	if s.filters != nil {
+		allowed := s.filters.IsPropertyAllowed(prop)
+		s.logger.WithFields(logrus.Fields{
+			"url":             property["url"],
+			"allowed":         allowed,
+			"living_area":     prop.LivingArea,
+			"min_living_area": s.filters.MinLivingArea,
+			"num_rooms":       prop.NumRooms,
+			"min_rooms":       s.filters.MinRooms,
+			"filters":         s.filters,
+		}).Info("Filter check result")
+		if !allowed {
+			s.logger.Info("Property filtered out by notification filters")
+			return nil
+		}
 	}
 
 	// Safely convert numeric values
