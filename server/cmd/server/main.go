@@ -58,11 +58,11 @@ func main() {
 		logger.WithError(err).Fatal("Failed to get city names for scheduler")
 	}
 	// Note: GetCityNames returns normalized city names suitable for Funda URLs
-	scheduler := scheduler.NewScheduler(spiderManager, logger, cityNames)
+	scheduler := scheduler.NewScheduler(spiderManager, db, logger, cityNames)
 
 	// Comment out scheduler auto-start - uncomment when needed
-	// scheduler.Start()
-	// logger.Info("Started scheduler for automated scraping")
+	scheduler.Start()
+	logger.Info("Started scheduler for automated scraping")
 
 	// Start geocoding in a background goroutine
 	go func() {

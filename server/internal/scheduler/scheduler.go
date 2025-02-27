@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"fundamental/server/config"
+	"fundamental/server/internal/database"
+	"fundamental/server/internal/geometry"
 	"fundamental/server/internal/scraping"
 	"os"
 	"sync"
@@ -35,18 +37,19 @@ func (j JobType) String() string {
 
 // Scheduler manages periodic execution of spiders
 type Scheduler struct {
-	spiderManager *scraping.SpiderManager
-	logger        *logrus.Logger
-	stopChan      chan struct{}
-	wg            sync.WaitGroup
-	cities        []string          // original city names
-	normalizedMap map[string]string // maps original -> normalized
-	jobMutex      sync.Mutex        // Ensures sequential job execution
-	isStartupRun  bool              // Tracks whether we're in startup run
+	spiderManager   *scraping.SpiderManager
+	logger          *logrus.Logger
+	stopChan        chan struct{}
+	wg              sync.WaitGroup
+	cities          []string                  // original city names
+	normalizedMap   map[string]string         // maps original -> normalized
+	jobMutex        sync.Mutex                // Ensures sequential job execution
+	isStartupRun    bool                      // Tracks whether we're in startup run
+	districtManager *geometry.DistrictManager // For updating district hulls
 }
 
 // NewScheduler creates a new scheduler
-func NewScheduler(spiderManager *scraping.SpiderManager, logger *logrus.Logger, cities []string) *Scheduler {
+func NewScheduler(spiderManager *scraping.SpiderManager, db *database.Database, logger *logrus.Logger, cities []string) *Scheduler {
 	if logger == nil {
 		logger = logrus.New()
 		logger.SetFormatter(&logrus.JSONFormatter{})
@@ -61,12 +64,13 @@ func NewScheduler(spiderManager *scraping.SpiderManager, logger *logrus.Logger, 
 	}
 
 	return &Scheduler{
-		spiderManager: spiderManager,
-		logger:        logger,
-		stopChan:      make(chan struct{}),
-		cities:        cities,
-		normalizedMap: normalizedMap,
-		isStartupRun:  true,
+		spiderManager:   spiderManager,
+		logger:          logger,
+		stopChan:        make(chan struct{}),
+		cities:          cities,
+		normalizedMap:   normalizedMap,
+		isStartupRun:    true,
+		districtManager: geometry.NewDistrictManager(db.GetDB(), logger),
 	}
 }
 
@@ -124,6 +128,16 @@ func (s *Scheduler) executeScheduledJobs(t time.Time) {
 		s.logger.Info("Starting scheduled sold spider jobs")
 		s.runSoldSpiders()
 		s.logger.Info("Completed scheduled sold spider jobs")
+	}
+
+	// Check if it's time to update district hulls (00:30)
+	if t.Hour() == 0 && t.Minute() == 30 {
+		s.logger.Info("Starting scheduled district hull update")
+		if err := s.districtManager.UpdateDistrictHulls(); err != nil {
+			s.logger.WithError(err).Error("Failed to update district hulls")
+		} else {
+			s.logger.Info("Completed district hull update")
+		}
 	}
 
 	// Check if it's time for the active spider (every hour)
