@@ -14,7 +14,6 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import * as d3 from 'd3';
-import PriceHeatmap from './PriceHeatmap';
 import { formatPrice } from '../utils/format';
 
 interface FilterOptions {
@@ -541,11 +540,6 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                             </ScatterChart>
                         </ResponsiveContainer>
                     </Paper>
-                </Grid>
-
-                {/* Price Heatmap */}
-                <Grid item xs={12}>
-                    <PriceHeatmap properties={filteredPropertiesMemo} />
                 </Grid>
 
                 {/* Price by Postal Code */}
