@@ -295,6 +295,29 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
         })).sort((a, b) => a.rooms - b.rooms);
     }, [filteredPropertiesMemo]);
 
+    // Room Price Premium Analysis Data
+    const roomPricePremiumData = useMemo(() => {
+        const roomGroups = d3.group(
+            filteredPropertiesMemo.filter(p => p.num_rooms && p.price),
+            d => d.num_rooms
+        );
+
+        const data = Array.from(roomGroups, ([rooms, group]) => ({
+            rooms: Number(rooms),
+            avgPrice: d3.mean(group, d => d.price) || 0,
+            count: group.length
+        })).sort((a, b) => a.rooms - b.rooms);
+
+        // Calculate price premium compared to previous room count
+        return data.map((item, index) => ({
+            rooms: item.rooms,
+            count: item.count,
+            avgPrice: item.avgPrice,
+            pricePremium: index > 0 ? item.avgPrice - data[index - 1].avgPrice : 0,
+            percentageIncrease: index > 0 ? ((item.avgPrice - data[index - 1].avgPrice) / data[index - 1].avgPrice) * 100 : 0
+        })).filter(d => d.rooms <= 10);  // Filter to show only up to 10 rooms
+    }, [filteredPropertiesMemo]);
+
     // Calculate regression line for scatter plot
     const calculateRegressionLine = useCallback((data: any[]) => {
         const xValues = data.map(d => d.living_area);
@@ -730,38 +753,67 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                     </Paper>
                 </Grid>
 
-                {/* Property Type Analysis */}
+                {/* Room Distribution Analysis */}
                 <Grid item xs={12} md={6}>
                     <Paper sx={{ p: 3 }}>
                         <Typography variant="h6" gutterBottom>
-                            Property Type Distribution
+                            Price Premium per Additional Room
                         </Typography>
                         <ResponsiveContainer width="100%" height={400}>
-                            <BarChart 
-                                data={propertyTypeData} 
-                                margin={{ top: 20, right: 30, bottom: 20, left: 60 }}
-                                layout="vertical"
+                            <ComposedChart 
+                                data={roomPricePremiumData} 
+                                margin={{ top: 20, right: 60, bottom: 20, left: 60 }}
                             >
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis type="number" />
+                                <XAxis 
+                                    dataKey="rooms"
+                                    label={{ value: 'Number of Rooms', position: 'insideBottom', offset: -10 }}
+                                />
                                 <YAxis 
-                                    dataKey="type" 
-                                    type="category"
-                                    width={150}
+                                    yAxisId="left"
+                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                >
+                                    <Label value="Price Premium (€)" angle={-90} position="center" offset={0} dx={-50} />
+                                </YAxis>
+                                <YAxis 
+                                    yAxisId="right"
+                                    orientation="right"
+                                    tickFormatter={(value) => `${value.toFixed(1)}%`}
+                                >
+                                    <Label value="Percentage Increase" angle={90} position="center" offset={0} dx={50} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any, name: string, props: any) => {
+                                        if (name === 'Price Premium') {
+                                            const roundedValue = Math.round(value / 1000) * 1000;
+                                            return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
+                                        }
+                                        if (name === 'Percentage Increase') return [`${Number(value).toFixed(1)}% (${props.payload.count} properties)`, name];
+                                        return [value, name];
+                                    }}
                                 />
-                                <Tooltip />
-                                <Legend />
+                                <Legend 
+                                    verticalAlign="bottom"
+                                    align="center"
+                                    layout="horizontal"
+                                    wrapperStyle={{
+                                        paddingTop: "20px"
+                                    }}
+                                />
                                 <Bar 
-                                    dataKey="count" 
+                                    yAxisId="left"
+                                    dataKey="pricePremium" 
                                     fill="#8884d8" 
-                                    name="Number of Properties"
+                                    name="Price Premium"
                                 />
-                                <Bar 
-                                    dataKey="avgPrice" 
-                                    fill="#82ca9d" 
-                                    name="Average Price"
+                                <Line 
+                                    yAxisId="right"
+                                    type="monotone"
+                                    dataKey="percentageIncrease" 
+                                    stroke="#82ca9d" 
+                                    name="Percentage Increase"
                                 />
-                            </BarChart>
+                            </ComposedChart>
                         </ResponsiveContainer>
                     </Paper>
                 </Grid>
