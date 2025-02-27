@@ -784,12 +784,8 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                                 </YAxis>
                                 <Tooltip 
                                     formatter={(value: any, name: string, props: any) => {
-                                        if (name === 'Price Premium') {
-                                            const roundedValue = Math.round(value / 1000) * 1000;
-                                            return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
-                                        }
-                                        if (name === 'Percentage Increase') return [`${Number(value).toFixed(1)}% (${props.payload.count} properties)`, name];
-                                        return [value, name];
+                                        const roundedValue = Math.round(value / 1000) * 1000;
+                                        return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
                                     }}
                                 />
                                 <Legend 
@@ -826,7 +822,7 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                         </Typography>
                         <ResponsiveContainer width="100%" height={400}>
                             <BarChart 
-                                data={roomsImpactData} 
+                                data={roomsImpactData.filter(d => d.rooms <= 10)} 
                                 margin={{ top: 20, right: 30, bottom: 20, left: 60 }}
                             >
                                 <CartesianGrid strokeDasharray="3 3" />
@@ -837,12 +833,22 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                                 <YAxis 
                                     tickFormatter={(value) => `€${(value/1000)}k`}
                                 >
-                                    <Label value="Average Price (€)" angle={-90} position="insideLeft" offset={10} />
+                                    <Label value="Average Price (€)" angle={-90} position="center" dx={-60} />
                                 </YAxis>
                                 <Tooltip 
-                                    formatter={(value: any) => `€${Number(value).toLocaleString()}`}
+                                    formatter={(value: any, name: string, props: any) => {
+                                        const roundedValue = Math.round(value / 1000) * 1000;
+                                        return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
+                                    }}
                                 />
-                                <Legend />
+                                <Legend 
+                                    verticalAlign="bottom"
+                                    align="center"
+                                    layout="horizontal"
+                                    wrapperStyle={{
+                                        paddingTop: "20px"
+                                    }}
+                                />
                                 <Bar 
                                     dataKey="avgPrice" 
                                     fill="#8884d8" 
