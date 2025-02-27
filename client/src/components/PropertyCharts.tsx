@@ -14,7 +14,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import * as d3 from 'd3';
-import { formatPrice } from '../utils/format';
+import PriceHeatmap from './PriceHeatmap';
 
 interface FilterOptions {
     startDate: Dayjs | null;
@@ -542,6 +542,11 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                     </Paper>
                 </Grid>
 
+                {/* Price Heatmap */}
+                <Grid item xs={12}>
+                    <PriceHeatmap properties={filteredPropertiesMemo} />
+                </Grid>
+
                 {/* Price by Postal Code */}
                 <Grid item xs={12}>
                     <Paper sx={{ p: 3 }}>
@@ -828,6 +833,56 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                                     tickFormatter={(value) => `€${(value/1000)}k`}
                                 >
                                     <Label value="Average Price (€)" angle={-90} position="center" dx={-60} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any, name: string, props: any) => {
+                                        const roundedValue = Math.round(value / 1000) * 1000;
+                                        return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
+                                    }}
+                                />
+                                <Legend 
+                                    verticalAlign="bottom"
+                                    align="center"
+                                    layout="horizontal"
+                                    wrapperStyle={{
+                                        paddingTop: "20px"
+                                    }}
+                                />
+                                <Bar 
+                                    dataKey="avgPrice" 
+                                    fill="#8884d8" 
+                                    name="Average Price"
+                                />
+                                <Bar 
+                                    dataKey="medianPrice" 
+                                    fill="#82ca9d" 
+                                    name="Median Price"
+                                />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </Paper>
+                </Grid>
+
+                {/* Property Type Analysis */}
+                <Grid item xs={12}>
+                    <Paper sx={{ p: 3 }}>
+                        <Typography variant="h6" gutterBottom>
+                            Price Analysis by Property Type
+                        </Typography>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <BarChart 
+                                data={propertyTypeData} 
+                                margin={{ top: 20, right: 30, bottom: 20, left: 60 }}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis 
+                                    dataKey="type"
+                                    label={{ value: 'Property Type', position: 'insideBottom', offset: -10 }}
+                                />
+                                <YAxis 
+                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                >
+                                    <Label value="Price (€)" angle={-90} position="center" dx={-60} />
                                 </YAxis>
                                 <Tooltip 
                                     formatter={(value: any, name: string, props: any) => {

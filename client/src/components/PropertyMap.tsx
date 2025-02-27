@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, CircleMarker, LayerGroup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
@@ -8,9 +8,6 @@ import { api } from '../services/api';
 import { Icon, LatLngTuple } from 'leaflet';
 import { CircularProgress, Typography, Box, Button, FormControl, InputLabel, Select, MenuItem, Slider, Grid } from '@mui/material';
 import MarkerClusterGroup from 'react-leaflet-cluster';
-import { GeoJSON, Tooltip } from 'react-leaflet';
-import { Feature, Polygon } from 'geojson';
-import * as d3 from 'd3';
 import { formatPrice } from '../utils/format';
 
 // Fix for default marker icon
