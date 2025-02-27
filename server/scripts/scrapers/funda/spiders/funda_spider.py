@@ -36,6 +36,10 @@ class FundaSpider(scrapy.Spider):
         self.total_items_scraped = 0
         self.new_items_found = 0
         self.active_urls = set()  # Track all active URLs for refresh operation
+        self.empty_pages_count = 0  # Track consecutive empty pages
+        self.MAX_EMPTY_PAGES = 3  # Stop after this many consecutive empty pages
+        self.no_new_listings_count = 0  # Track consecutive pages without new listings
+        self.MAX_NO_NEW_LISTINGS = 3  # Stop after this many consecutive pages without new listings
         
         # Initialize database connection for URL checking
         self.db = FundaDB()
@@ -115,25 +119,41 @@ class FundaSpider(scrapy.Spider):
         new_listing_urls = {url for url in all_listing_urls 
                           if url not in self.processed_urls and url not in self.existing_urls}
         
-        # If we found no new listings on this page, stop crawling
-        if not new_listing_urls:
-            self.logger.info(f"No new listings found on page {self.page_count}, all URLs already exist in database. Stopping crawl.")
-            return
-
         # Log stats about new vs existing URLs
         self.logger.info(f"Found {len(all_listing_urls)} total listings on page {self.page_count}")
         self.logger.info(f"Found {len(new_listing_urls)} new listings to process")
-        self.new_items_found += len(new_listing_urls)
-        
-        # Process only new listings
-        for url in new_listing_urls:
-            self.processed_urls.add(url)
-            yield scrapy.Request(
-                url,
-                callback=self.parse_house,
-                headers=self.headers,
-                meta={'dont_cache': True}
-            )
+        self.logger.info(f"Skipped {len(all_listing_urls) - len(new_listing_urls)} already processed listings")
+
+        # Check for empty page
+        if not all_listing_urls:
+            self.empty_pages_count += 1
+            self.logger.info(f"Empty page detected. Empty pages count: {self.empty_pages_count}")
+            if self.empty_pages_count >= self.MAX_EMPTY_PAGES:
+                self.logger.info(f"Stopping after {self.MAX_EMPTY_PAGES} consecutive empty pages")
+                return
+        else:
+            self.empty_pages_count = 0  # Reset counter when we find listings
+
+        # Track pages without new listings
+        if not new_listing_urls:
+            self.no_new_listings_count += 1
+            self.logger.info(f"No new listings on this page. Pages without new listings: {self.no_new_listings_count}")
+            if self.no_new_listings_count >= self.MAX_NO_NEW_LISTINGS:
+                self.logger.info(f"Stopping after {self.MAX_NO_NEW_LISTINGS} consecutive pages without new listings")
+                return
+        else:
+            self.no_new_listings_count = 0  # Reset counter when we find new listings
+            self.new_items_found += len(new_listing_urls)
+            
+            # Process only new listings
+            for url in new_listing_urls:
+                self.processed_urls.add(url)
+                yield scrapy.Request(
+                    url,
+                    callback=self.parse_house,
+                    headers=self.headers,
+                    meta={'dont_cache': True}
+                )
         
         # Handle pagination if we haven't reached max_pages
         if not self.max_pages or self.page_count < self.max_pages:

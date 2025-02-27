@@ -14,6 +14,14 @@ const axiosInstance = axios.create({
     }
 });
 
+// Helper function to handle API responses
+async function handleResponse(response: Response) {
+    if (!response.ok) {
+        throw new Error('Failed to fetch data');
+    }
+    return response.json();
+}
+
 export const api = {
     getAllProperties: async (dateRange: DateRange, metropolitanAreaId?: number | null): Promise<Property[]> => {
         const response = await axiosInstance.get('/properties', {
