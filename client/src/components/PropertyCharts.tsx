@@ -189,34 +189,23 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
     const timeSeriesData = useMemo(() => {
         // Separate active and sold properties
         const soldProperties = filteredPropertiesMemo
-            .filter(p => p.status === 'sold' && p.selling_date)
-            .sort((a, b) => new Date(a.selling_date).getTime() - new Date(b.selling_date).getTime());
+            .filter(p => p.status === 'sold' && p.selling_date && dayjs(p.selling_date).isValid() && dayjs(p.selling_date).year() >= 2024)
+            .sort((a, b) => dayjs(a.selling_date).valueOf() - dayjs(b.selling_date).valueOf());
 
         const activeProperties = filteredPropertiesMemo
-            .filter(p => p.status === 'active')
+            .filter(p => 
+                p.status === 'active' && 
+                p.scraped_at && 
+                dayjs(p.scraped_at).isValid() && 
+                dayjs(p.scraped_at).year() >= 2024
+            )
             .map(p => ({
                 ...p,
-                effectiveDate: p.listing_date || p.scraped_at
+                effectiveDate: p.scraped_at
             }))
-            .sort((a, b) => new Date(a.effectiveDate).getTime() - new Date(b.effectiveDate).getTime());
+            .sort((a, b) => dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf());
 
         if (soldProperties.length === 0 && activeProperties.length === 0) return [];
-
-        // Determine date range
-        const dates = [
-            ...soldProperties.map(p => p.selling_date),
-            ...activeProperties.map(p => p.effectiveDate)
-        ].filter(Boolean);
-
-        const startDate = dayjs(Math.min(...dates.map(d => new Date(d).getTime()))).startOf('month');
-        const endDate = dayjs(Math.max(...dates.map(d => new Date(d).getTime()))).endOf('month');
-        
-        const months: string[] = [];
-        let currentDate = startDate;
-        while (currentDate.isBefore(endDate) || currentDate.isSame(endDate, 'month')) {
-            months.push(currentDate.format('YYYY-MM'));
-            currentDate = currentDate.add(1, 'month');
-        }
 
         // Group properties by month
         const soldMonthlyGroups = d3.group(soldProperties, d => 
@@ -227,7 +216,17 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
             dayjs(d.effectiveDate).format('YYYY-MM')
         );
 
-        return months.map(month => {
+        // Get unique months from both groups
+        const uniqueMonths = new Set([
+            ...Array.from(soldMonthlyGroups.keys()),
+            ...Array.from(activeMonthlyGroups.keys())
+        ]);
+
+        // Convert to array and sort chronologically
+        const sortedMonths = Array.from(uniqueMonths).sort();
+
+        // Create data points only for months that have data
+        return sortedMonths.map(month => {
             const soldGroup = soldMonthlyGroups.get(month) || [];
             const activeGroup = activeMonthlyGroups.get(month) || [];
             const allProperties = [...soldGroup, ...activeGroup];
@@ -238,7 +237,10 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                 median_price: d3.median(allProperties, d => d.price) || 0,
                 avg_days_to_sell: d3.mean(soldGroup, d => {
                     if (!d.listing_date || !d.selling_date) return null;
-                    return (new Date(d.selling_date).getTime() - new Date(d.listing_date).getTime()) / (1000 * 60 * 60 * 24);
+                    const listDate = dayjs(d.listing_date);
+                    const sellDate = dayjs(d.selling_date);
+                    if (!listDate.isValid() || !sellDate.isValid()) return null;
+                    return sellDate.diff(listDate, 'day');
                 }) || 0,
                 count: allProperties.length,
                 active_count: activeGroup.length,
@@ -259,6 +261,38 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
             median_price_per_sqm: d3.median(group, d => d.price / d.living_area) || 0,
             count: group.length
         })).sort((a, b) => b.avg_price_per_sqm - a.avg_price_per_sqm);
+    }, [filteredPropertiesMemo]);
+
+    // Property Type Analysis Data
+    const propertyTypeData = useMemo(() => {
+        const typeGroups = d3.group(
+            filteredPropertiesMemo.filter(p => p.property_type && p.price),
+            d => d.property_type
+        );
+
+        return Array.from(typeGroups, ([type, group]) => ({
+            type,
+            count: group.length,
+            avgPrice: d3.mean(group, d => d.price) || 0,
+            medianPrice: d3.median(group, d => d.price) || 0,
+            avgSize: d3.mean(group, d => d.living_area) || 0
+        })).sort((a, b) => b.count - a.count);
+    }, [filteredPropertiesMemo]);
+
+    // Rooms Impact Analysis Data
+    const roomsImpactData = useMemo(() => {
+        const roomGroups = d3.group(
+            filteredPropertiesMemo.filter(p => p.num_rooms && p.price),
+            d => d.num_rooms
+        );
+
+        return Array.from(roomGroups, ([rooms, group]) => ({
+            rooms: Number(rooms),
+            count: group.length,
+            avgPrice: d3.mean(group, d => d.price) || 0,
+            medianPrice: d3.median(group, d => d.price) || 0,
+            avgSize: d3.mean(group, d => d.living_area) || 0
+        })).sort((a, b) => a.rooms - b.rooms);
     }, [filteredPropertiesMemo]);
 
     // Calculate regression line for scatter plot
@@ -536,7 +570,11 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis 
                                     dataKey="month" 
-                                    tickFormatter={(value) => dayjs(value).format('MMM YY')}
+                                    tickFormatter={(value) => {
+                                        // Parse YYYY-MM format
+                                        const [year, month] = value.split('-');
+                                        return dayjs(`${year}-${month}-01`).format('MMM YY');
+                                    }}
                                 />
                                 <YAxis 
                                     yAxisId="left"
@@ -622,6 +660,146 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                                     dataKey="median_price_per_sqm" 
                                     fill="#82ca9d" 
                                     name="Median Price/m²"
+                                />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </Paper>
+                </Grid>
+
+                {/* Market Velocity Dashboard */}
+                <Grid item xs={12}>
+                    <Paper sx={{ p: 3 }}>
+                        <Typography variant="h6" gutterBottom>
+                            Market Velocity Analysis
+                        </Typography>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <ComposedChart data={timeSeriesData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis 
+                                    dataKey="month" 
+                                    tickFormatter={(value) => {
+                                        // Parse YYYY-MM format
+                                        const [year, month] = value.split('-');
+                                        return dayjs(`${year}-${month}-01`).format('MMM YY');
+                                    }}
+                                />
+                                <YAxis 
+                                    yAxisId="left"
+                                    orientation="left"
+                                    tickFormatter={(value) => value.toFixed(0)}
+                                >
+                                    <Label value="Days to Sell" angle={-90} position="insideLeft" offset={10} />
+                                </YAxis>
+                                <YAxis 
+                                    yAxisId="right"
+                                    orientation="right"
+                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                >
+                                    <Label value="Price Range (€)" angle={90} position="insideRight" offset={10} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any, name: string) => {
+                                        if (name.includes('Price')) return `€${Number(value).toLocaleString()}`;
+                                        return value.toFixed(1);
+                                    }}
+                                    labelFormatter={(label) => dayjs(label).format('MMMM YYYY')}
+                                />
+                                <Legend />
+                                <Bar
+                                    yAxisId="left"
+                                    dataKey="avg_days_to_sell"
+                                    fill="#8884d8"
+                                    name="Average Days to Sell"
+                                />
+                                <Line
+                                    yAxisId="right"
+                                    type="monotone"
+                                    dataKey="avg_price"
+                                    stroke="#82ca9d"
+                                    name="Average Price"
+                                />
+                                <Line
+                                    yAxisId="right"
+                                    type="monotone"
+                                    dataKey="median_price"
+                                    stroke="#ffc658"
+                                    name="Median Price"
+                                />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </Paper>
+                </Grid>
+
+                {/* Property Type Analysis */}
+                <Grid item xs={12} md={6}>
+                    <Paper sx={{ p: 3 }}>
+                        <Typography variant="h6" gutterBottom>
+                            Property Type Distribution
+                        </Typography>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <BarChart 
+                                data={propertyTypeData} 
+                                margin={{ top: 20, right: 30, bottom: 20, left: 60 }}
+                                layout="vertical"
+                            >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis type="number" />
+                                <YAxis 
+                                    dataKey="type" 
+                                    type="category"
+                                    width={150}
+                                />
+                                <Tooltip />
+                                <Legend />
+                                <Bar 
+                                    dataKey="count" 
+                                    fill="#8884d8" 
+                                    name="Number of Properties"
+                                />
+                                <Bar 
+                                    dataKey="avgPrice" 
+                                    fill="#82ca9d" 
+                                    name="Average Price"
+                                />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </Paper>
+                </Grid>
+
+                {/* Property Features Impact */}
+                <Grid item xs={12} md={6}>
+                    <Paper sx={{ p: 3 }}>
+                        <Typography variant="h6" gutterBottom>
+                            Price Impact by Number of Rooms
+                        </Typography>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <BarChart 
+                                data={roomsImpactData} 
+                                margin={{ top: 20, right: 30, bottom: 20, left: 60 }}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis 
+                                    dataKey="rooms"
+                                    label={{ value: 'Number of Rooms', position: 'insideBottom', offset: -10 }}
+                                />
+                                <YAxis 
+                                    tickFormatter={(value) => `€${(value/1000)}k`}
+                                >
+                                    <Label value="Average Price (€)" angle={-90} position="insideLeft" offset={10} />
+                                </YAxis>
+                                <Tooltip 
+                                    formatter={(value: any) => `€${Number(value).toLocaleString()}`}
+                                />
+                                <Legend />
+                                <Bar 
+                                    dataKey="avgPrice" 
+                                    fill="#8884d8" 
+                                    name="Average Price"
+                                />
+                                <Bar 
+                                    dataKey="medianPrice" 
+                                    fill="#82ca9d" 
+                                    name="Median Price"
                                 />
                             </BarChart>
                         </ResponsiveContainer>
