@@ -262,22 +262,6 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
         })).sort((a, b) => b.avg_price_per_sqm - a.avg_price_per_sqm);
     }, [filteredPropertiesMemo]);
 
-    // Property Type Analysis Data
-    const propertyTypeData = useMemo(() => {
-        const typeGroups = d3.group(
-            filteredPropertiesMemo.filter(p => p.property_type && p.price),
-            d => d.property_type
-        );
-
-        return Array.from(typeGroups, ([type, group]) => ({
-            type,
-            count: group.length,
-            avgPrice: d3.mean(group, d => d.price) || 0,
-            medianPrice: d3.median(group, d => d.price) || 0,
-            avgSize: d3.mean(group, d => d.living_area) || 0
-        })).sort((a, b) => b.count - a.count);
-    }, [filteredPropertiesMemo]);
-
     // Rooms Impact Analysis Data
     const roomsImpactData = useMemo(() => {
         const roomGroups = d3.group(
@@ -492,6 +476,11 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
         <Box mt={4}>
             {FilterPanel}
             <Grid container spacing={3}>
+                {/* Price Heatmap */}
+                <Grid item xs={12}>
+                    <PriceHeatmap properties={filteredPropertiesMemo} />
+                </Grid>
+
                 {/* Price vs Living Area Scatter Plot */}
                 <Grid item xs={12}>
                     <Paper sx={{ p: 3 }}>
@@ -540,11 +529,6 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                             </ScatterChart>
                         </ResponsiveContainer>
                     </Paper>
-                </Grid>
-
-                {/* Price Heatmap */}
-                <Grid item xs={12}>
-                    <PriceHeatmap properties={filteredPropertiesMemo} />
                 </Grid>
 
                 {/* Price by Postal Code */}
@@ -833,56 +817,6 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                                     tickFormatter={(value) => `€${(value/1000)}k`}
                                 >
                                     <Label value="Average Price (€)" angle={-90} position="center" dx={-60} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any, name: string, props: any) => {
-                                        const roundedValue = Math.round(value / 1000) * 1000;
-                                        return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
-                                    }}
-                                />
-                                <Legend 
-                                    verticalAlign="bottom"
-                                    align="center"
-                                    layout="horizontal"
-                                    wrapperStyle={{
-                                        paddingTop: "20px"
-                                    }}
-                                />
-                                <Bar 
-                                    dataKey="avgPrice" 
-                                    fill="#8884d8" 
-                                    name="Average Price"
-                                />
-                                <Bar 
-                                    dataKey="medianPrice" 
-                                    fill="#82ca9d" 
-                                    name="Median Price"
-                                />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
-
-                {/* Property Type Analysis */}
-                <Grid item xs={12}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Price Analysis by Property Type
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <BarChart 
-                                data={propertyTypeData} 
-                                margin={{ top: 20, right: 30, bottom: 20, left: 60 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="type"
-                                    label={{ value: 'Property Type', position: 'insideBottom', offset: -10 }}
-                                />
-                                <YAxis 
-                                    tickFormatter={(value) => `€${(value/1000)}k`}
-                                >
-                                    <Label value="Price (€)" angle={-90} position="center" dx={-60} />
                                 </YAxis>
                                 <Tooltip 
                                     formatter={(value: any, name: string, props: any) => {
