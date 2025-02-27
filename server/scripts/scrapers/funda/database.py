@@ -39,7 +39,9 @@ class FundaDB:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT url FROM properties WHERE status = "sold"')
-            return {row[0] for row in cursor.fetchall()}
+            urls = {row[0] for row in cursor.fetchall()}
+            print(f"Found {len(urls)} sold URLs in database")  # Keep this useful log
+            return urls
 
     def get_all_active_urls(self):
         """Get URLs of all properties that are either active, inactive, or republished (not sold)."""

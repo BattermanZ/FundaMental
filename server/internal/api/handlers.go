@@ -212,11 +212,19 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 				}
 			}
 			h.logger.Info("All city spiders have completed")
+
+			// Update district hulls after all spiders have completed
+			h.logger.Info("Starting district hulls update")
+			if err := h.districtManager.UpdateDistrictHulls(); err != nil {
+				h.logger.WithError(err).Error("Failed to update district hulls after spider completion")
+				return
+			}
+			h.logger.Info("District hulls updated successfully")
 		}()
 
 		message := "Spider process started. Cities will be processed sequentially."
 		if req.QueueSold {
-			message = "Spider process started. For each city, active properties will be processed first, followed by sold properties."
+			message = "Spider process started. For each city, active properties will be processed first, followed by sold properties. District hulls will be updated automatically after completion."
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "success",
@@ -237,8 +245,17 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 			h.logger.Info("Active spider completed, starting sold spider")
 			if err := h.spiderManager.RunSoldSpider(req.Place, nil, false); err != nil {
 				h.logger.WithError(err).Error("Failed to run sold spider")
+				return
 			}
 		}
+
+		// Update district hulls after processing the specific place
+		h.logger.Info("Starting district hulls update")
+		if err := h.districtManager.UpdateDistrictHulls(); err != nil {
+			h.logger.WithError(err).Error("Failed to update district hulls after spider completion")
+			return
+		}
+		h.logger.Info("District hulls updated successfully")
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -261,7 +278,7 @@ func (h *Handler) RunSoldSpider(c *gin.Context) {
 		go func() {
 			for _, city := range cities {
 				normalizedCity := config.NormalizeCity(city)
-				
+
 				h.logger.WithField("city", normalizedCity).Info("Starting sold spider")
 				err := h.spiderManager.RunSoldSpider(normalizedCity, nil, req.Resume)
 				if err != nil {

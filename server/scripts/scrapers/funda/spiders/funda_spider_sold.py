@@ -43,6 +43,10 @@ class FundaSpiderSold(scrapy.Spider):
         # Initialize database connection
         self.db = FundaDB()
         
+        # Load existing sold URLs from database
+        self.existing_sold_urls = self.db.get_sold_urls()
+        self.logger.info(f"Loaded {len(self.existing_sold_urls)} existing sold URLs from database")
+        
         # Create state directory if it doesn't exist
         self.state_dir = os.path.join(os.getcwd(), '.spider_state')
         os.makedirs(self.state_dir, exist_ok=True)
@@ -151,15 +155,17 @@ class FundaSpiderSold(scrapy.Spider):
                 full_url = response.urljoin(url)
                 all_listing_urls.add(full_url)
 
-        # Process all found URLs that haven't been processed in this run
+        # Filter out URLs that are already in the database or processed in this run
         new_listing_urls = {url for url in all_listing_urls 
-                          if url not in self.processed_urls}
+                          if url not in self.processed_urls and url not in self.existing_sold_urls}
         
         # Log stats about new vs existing URLs
         self.logger.info(f"Found {len(all_listing_urls)} total listings on page {self.page_count}")
         self.logger.info(f"Found {len(new_listing_urls)} new listings to process")
+        self.logger.info(f"Skipped {len(all_listing_urls) - len(new_listing_urls)} already processed listings")
         
-        # Update empty pages counter
+        # Check both stopping conditions:
+        # 1. Empty pages check
         if len(all_listing_urls) == 0:
             self.empty_pages_count += 1
             self.logger.info(f"Empty page detected. Empty pages count: {self.empty_pages_count}")
@@ -168,7 +174,13 @@ class FundaSpiderSold(scrapy.Spider):
                 return
         else:
             self.empty_pages_count = 0  # Reset counter when we find listings
-            self.new_items_found += len(new_listing_urls)
+        
+        # 2. No new listings check (from active spider)
+        if not new_listing_urls and len(all_listing_urls) > 0:
+            self.logger.info(f"No new listings found on page {self.page_count}, all URLs already exist in database. Stopping crawl.")
+            return
+            
+        self.new_items_found += len(new_listing_urls)
         
         # Process all listings
         for url in new_listing_urls:
