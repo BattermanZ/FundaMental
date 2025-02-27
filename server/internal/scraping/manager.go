@@ -29,7 +29,6 @@ type SpiderParams struct {
 	SpiderType string `json:"spider_type"` // "active" or "sold"
 	Place      string `json:"place"`       // normalized city name (e.g., "den-bosch" not "'s-Hertogenbosch")
 	MaxPages   *int   `json:"max_pages"`   // optional max pages to scrape
-	Resume     bool   `json:"resume"`      // whether to resume from previous state
 }
 
 // SpiderMessage represents a message from the Python script
@@ -77,7 +76,6 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 		"spider_type": params.SpiderType,
 		"place":       params.Place, // Already normalized by scheduler
 		"max_pages":   params.MaxPages,
-		"resume":      params.Resume,
 	}).Info("Starting spider")
 
 	// Prepare the command
@@ -88,7 +86,6 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 		"spider_type": params.SpiderType,
 		"place":       params.Place,
 		"max_pages":   params.MaxPages,
-		"resume":      params.Resume,
 	}
 
 	// Convert input to JSON
@@ -232,21 +229,22 @@ func (m *SpiderManager) RunSpider(params SpiderParams) error {
 
 // RunActiveSpider runs the active listings spider
 func (m *SpiderManager) RunActiveSpider(place string, maxPages *int) error {
-	return m.RunSpider(SpiderParams{
+	params := SpiderParams{
 		SpiderType: "active",
 		Place:      place,
 		MaxPages:   maxPages,
-	})
+	}
+	return m.RunSpider(params)
 }
 
 // RunSoldSpider runs the sold listings spider
-func (m *SpiderManager) RunSoldSpider(place string, maxPages *int, resume bool) error {
-	return m.RunSpider(SpiderParams{
+func (m *SpiderManager) RunSoldSpider(place string, maxPages *int) error {
+	params := SpiderParams{
 		SpiderType: "sold",
 		Place:      place,
 		MaxPages:   maxPages,
-		Resume:     resume,
-	})
+	}
+	return m.RunSpider(params)
 }
 
 // RunRefreshSpider runs the spider to refresh active listings and mark inactive ones
@@ -263,5 +261,19 @@ func (m *SpiderManager) RunRefreshSpider(place string) error {
 		return fmt.Errorf("failed to run refresh spider: %v", err)
 	}
 
+	return nil
+}
+
+func (m *SpiderManager) runSpider(params SpiderParams) error {
+	// Convert params to JSON
+	jsonData := map[string]interface{}{
+		"spider_type": params.SpiderType,
+		"place":       params.Place,
+	}
+	if params.MaxPages != nil {
+		jsonData["max_pages"] = *params.MaxPages
+	}
+
+	// ... rest of the function
 	return nil
 }

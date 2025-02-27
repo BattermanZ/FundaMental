@@ -119,14 +119,17 @@ export const api = {
         return response.json();
     },
 
-    runSpider: async (params: { type: 'active' | 'sold', resume?: boolean, queueSold?: boolean }) => {
-        const endpoint = `/spiders/${params.type}`;
-        const response = await axiosInstance.post(endpoint, {
-            resume: params.resume,
-            queue_sold: params.queueSold
-        }, {
-            timeout: 30000 // Increase timeout to 30 seconds for spider operations
+    runSpider: async (params: { type: 'active' | 'sold', queueSold?: boolean }) => {
+        const response = await fetch(`${API_BASE_URL}/spider/run`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                type: params.type,
+                queueSold: params.queueSold,
+            }),
         });
-        return response.data;
+        return handleResponse(response);
     }
 }; 

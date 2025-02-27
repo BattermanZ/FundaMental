@@ -28,7 +28,7 @@ class FundaSpiderSold(scrapy.Spider):
         }
     }
 
-    def __init__(self, place='amsterdam', max_pages=None, resume=False, *args, **kwargs):
+    def __init__(self, place='amsterdam', max_pages=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.place = place
         self.max_pages = int(max_pages) if max_pages else None
@@ -36,7 +36,6 @@ class FundaSpiderSold(scrapy.Spider):
         self.processed_urls = set()  # Track processed URLs in current run
         self.total_items_scraped = 0
         self.new_items_found = 0
-        self.resume = resume
         self.empty_pages_count = 0  # Track consecutive empty pages
         self.MAX_EMPTY_PAGES = 3  # Stop after this many consecutive empty pages
         
@@ -47,15 +46,6 @@ class FundaSpiderSold(scrapy.Spider):
         self.existing_sold_urls = self.db.get_sold_urls()
         self.logger.info(f"Loaded {len(self.existing_sold_urls)} existing sold URLs from database")
         
-        # Create state directory if it doesn't exist
-        self.state_dir = os.path.join(os.getcwd(), '.spider_state')
-        os.makedirs(self.state_dir, exist_ok=True)
-        self.state_file = os.path.join(self.state_dir, f'funda_sold_{place}_state.pkl')
-        
-        # Load previous state if resuming
-        if self.resume and os.path.exists(self.state_file):
-            self.load_state()
-        
         # Base parameters for the search
         self.base_params = {
             'selected_area': json.dumps([place]),
@@ -63,11 +53,6 @@ class FundaSpiderSold(scrapy.Spider):
             'object_type': json.dumps(['house', 'apartment']),
             'sort': 'date_down'  # Most recent first
         }
-        
-        # If resuming and we have a page count, start from there
-        if self.resume and self.page_count > 1:
-            self.base_params['page'] = self.page_count
-            self.logger.info(f"Resuming from page {self.page_count}")
         
         base_url = f"https://www.funda.nl/zoeken/koop/?{urllib.parse.urlencode(self.base_params)}"
         self.start_urls = [base_url]
@@ -86,31 +71,6 @@ class FundaSpiderSold(scrapy.Spider):
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"macOS"'
         }
-
-    def save_state(self):
-        """Save current spider state for resuming later."""
-        state = {
-            'page_count': self.page_count,
-            'processed_urls': self.processed_urls,
-            'total_items_scraped': self.total_items_scraped,
-            'new_items_found': self.new_items_found
-        }
-        with open(self.state_file, 'wb') as f:
-            pickle.dump(state, f)
-        self.logger.info(f"Saved state: Page {self.page_count}, Items {self.total_items_scraped}, New Items {self.new_items_found}")
-
-    def load_state(self):
-        """Load previous spider state."""
-        try:
-            with open(self.state_file, 'rb') as f:
-                state = pickle.load(f)
-                self.page_count = state['page_count']
-                self.processed_urls = state['processed_urls']
-                self.total_items_scraped = state['total_items_scraped']
-                self.new_items_found = state.get('new_items_found', 0)  # Backward compatibility
-                self.logger.info(f"Loaded state: Page {self.page_count}, Items {self.total_items_scraped}, New Items {self.new_items_found}")
-        except Exception as e:
-            self.logger.error(f"Error loading state: {e}")
 
     def start_requests(self):
         for url in self.start_urls:
@@ -191,9 +151,6 @@ class FundaSpiderSold(scrapy.Spider):
                 headers=self.headers,
                 meta={'dont_cache': True}
             )
-        
-        # Save state after processing each page
-        self.save_state()
         
         # Handle pagination if we haven't reached max_pages and haven't hit empty pages limit
         if (not self.max_pages or self.page_count < self.max_pages) and self.empty_pages_count < self.MAX_EMPTY_PAGES:
@@ -451,7 +408,4 @@ class FundaSpiderSold(scrapy.Spider):
         self.logger.info(f"Total pages scraped: {self.page_count}")
         self.logger.info(f"Total new items found: {self.new_items_found}")
         self.logger.info(f"Total items scraped: {self.total_items_scraped}")
-        self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}")
-        
-        # Save final state
-        self.save_state() 
+        self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}") 

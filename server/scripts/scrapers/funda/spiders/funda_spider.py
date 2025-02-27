@@ -7,7 +7,6 @@ import json
 from datetime import datetime
 import urllib.parse
 import os
-import pickle
 
 class FundaSpider(scrapy.Spider):
     name = "funda_spider"
@@ -43,11 +42,6 @@ class FundaSpider(scrapy.Spider):
         self.existing_urls = self.db.get_all_active_urls()  # Get existing active/inactive URLs from DB
         self.logger.info(f"Found {len(self.existing_urls)} existing active/inactive URLs in database")
         
-        # Create state directory if it doesn't exist
-        self.state_dir = os.path.join(os.getcwd(), '.spider_state')
-        os.makedirs(self.state_dir, exist_ok=True)
-        self.state_file = os.path.join(self.state_dir, f'funda_active_{place}_state.pkl')
-        
         # Base parameters for the search
         self.base_params = {
             'selected_area': json.dumps([place]),
@@ -73,18 +67,6 @@ class FundaSpider(scrapy.Spider):
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"macOS"'
         }
-
-    def save_state(self):
-        """Save current spider state for resuming later."""
-        state = {
-            'page_count': self.page_count,
-            'processed_urls': self.processed_urls,
-            'total_items_scraped': self.total_items_scraped,
-            'new_items_found': self.new_items_found
-        }
-        with open(self.state_file, 'wb') as f:
-            pickle.dump(state, f)
-        self.logger.info(f"Saved state: Page {self.page_count}, Items {self.total_items_scraped}, New Items {self.new_items_found}")
 
     def start_requests(self):
         for url in self.start_urls:
@@ -152,9 +134,6 @@ class FundaSpider(scrapy.Spider):
                 headers=self.headers,
                 meta={'dont_cache': True}
             )
-        
-        # Save state after processing each page
-        self.save_state()
         
         # Handle pagination if we haven't reached max_pages
         if not self.max_pages or self.page_count < self.max_pages:
@@ -535,7 +514,4 @@ class FundaSpider(scrapy.Spider):
         self.logger.info(f"Total pages scraped: {self.page_count}")
         self.logger.info(f"Total new items found: {self.new_items_found}")
         self.logger.info(f"Total items scraped: {self.total_items_scraped}")
-        self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}")
-        
-        # Save final state
-        self.save_state() 
+        self.logger.info(f"Total unique URLs processed: {len(self.processed_urls)}") 

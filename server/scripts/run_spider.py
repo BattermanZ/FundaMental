@@ -47,7 +47,7 @@ twisted_logger = logging.getLogger('twisted')
 twisted_logger.addHandler(handler)
 twisted_logger.setLevel(logging.INFO)
 
-def run_spider(spider_type, place='amsterdam', max_pages=None, resume=False):
+def run_spider(spider_type, place='amsterdam', max_pages=None):
     """
     Run the specified spider with given parameters.
     
@@ -55,7 +55,6 @@ def run_spider(spider_type, place='amsterdam', max_pages=None, resume=False):
         spider_type: Either 'active' or 'sold'
         place: City to scrape
         max_pages: Maximum number of pages to scrape
-        resume: Whether to resume from previous state (sold spider only)
     """
     try:
         # Initialize settings
@@ -73,8 +72,7 @@ def run_spider(spider_type, place='amsterdam', max_pages=None, resume=False):
         elif spider_type == 'sold':
             process.crawl(FundaSpiderSold, 
                         place=place,
-                        max_pages=max_pages,
-                        resume=resume)
+                        max_pages=max_pages)
         else:
             raise ValueError(f"Invalid spider type: {spider_type}")
         
@@ -94,6 +92,5 @@ if __name__ == '__main__':
     spider_type = input_data.get('spider_type', 'active')
     place = input_data.get('place', 'amsterdam')
     max_pages = input_data.get('max_pages')
-    resume = input_data.get('resume', False)
     
-    run_spider(spider_type, place, max_pages, resume) 
+    run_spider(spider_type, place, max_pages) 
