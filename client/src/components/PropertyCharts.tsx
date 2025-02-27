@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useDeferredValue } from 'react';
 import { Property } from '../types/property';
 import { api } from '../services/api';
 import {
@@ -15,16 +15,8 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import * as d3 from 'd3';
 import PriceHeatmap from './PriceHeatmap';
-
-interface FilterOptions {
-    startDate: Dayjs | null;
-    endDate: Dayjs | null;
-    propertyType: string;
-    status: string;
-    numRooms: [number, number];
-    priceRange: [number, number];
-    sizeRange: [number, number];
-}
+import FilterPanel, { FilterOptions } from './FilterPanel';
+import PropertyChartData from './PropertyChartData';
 
 interface PropertyChartsProps {
     metropolitanAreaId?: number | null;
@@ -54,6 +46,9 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
         size: { min: 0, max: 300 },
         rooms: { min: 1, max: 10 }
     });
+
+    // Use deferred value for expensive computations
+    const deferredFilters = useDeferredValue(filters);
 
     // Fetch data
     useEffect(() => {
@@ -114,53 +109,54 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
         fetchData();
     }, [metropolitanAreaId]);
 
-    // Memoize filtered properties
+    // Memoize filtered properties using deferred filters
     const filteredPropertiesMemo = useMemo(() => {
         if (!properties || properties.length === 0) return [];
         return properties.filter(property => {
             // Date filter - check listing_date/scraped_at for active and selling_date for sold
-            if (filters.startDate) {
+            if (deferredFilters.startDate) {
                 const effectiveDate = property.status === 'active' 
                     ? (property.listing_date ? dayjs(property.listing_date) : dayjs(property.scraped_at))
                     : (property.selling_date ? dayjs(property.selling_date) : null);
                 
-                if (effectiveDate && effectiveDate.isBefore(filters.startDate)) {
+                if (effectiveDate && effectiveDate.isBefore(deferredFilters.startDate)) {
                     return false;
                 }
             }
             
-            if (filters.endDate) {
+            if (deferredFilters.endDate) {
                 const effectiveDate = property.status === 'active' 
                     ? (property.listing_date ? dayjs(property.listing_date) : dayjs(property.scraped_at))
                     : (property.selling_date ? dayjs(property.selling_date) : null);
                 
-                if (effectiveDate && effectiveDate.isAfter(filters.endDate)) {
+                if (effectiveDate && effectiveDate.isAfter(deferredFilters.endDate)) {
                     return false;
                 }
             }
             
-            if (filters.propertyType !== 'all' && property.property_type !== filters.propertyType) return false;
-            if (filters.status !== 'all' && property.status !== filters.status) return false;
+            if (deferredFilters.propertyType !== 'all' && property.property_type !== deferredFilters.propertyType) return false;
+            if (deferredFilters.status !== 'all' && property.status !== deferredFilters.status) return false;
             if (property.num_rooms && (
-                property.num_rooms < filters.numRooms[0] ||
-                property.num_rooms > filters.numRooms[1]
+                property.num_rooms < deferredFilters.numRooms[0] ||
+                property.num_rooms > deferredFilters.numRooms[1]
             )) return false;
             if (property.price && (
-                property.price < filters.priceRange[0] ||
-                property.price > filters.priceRange[1]
+                property.price < deferredFilters.priceRange[0] ||
+                property.price > deferredFilters.priceRange[1]
             )) return false;
             if (property.living_area && (
-                property.living_area < filters.sizeRange[0] ||
-                property.living_area > filters.sizeRange[1]
+                property.living_area < deferredFilters.sizeRange[0] ||
+                property.living_area > deferredFilters.sizeRange[1]
             )) return false;
             
             return true;
         });
-    }, [properties, filters]);
+    }, [properties, deferredFilters]);
 
-    // Memoize chart data
-    const scatterData = useMemo(() => {
-        return filteredPropertiesMemo
+    // Memoize chart data computations
+    const chartData = useMemo(() => {
+        // Scatter plot data
+        const scatter = filteredPropertiesMemo
             .filter(p => p.living_area && p.price)
             .map(p => ({
                 living_area: p.living_area,
@@ -169,24 +165,21 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                 num_rooms: p.num_rooms || 1,
                 price_per_sqm: p.price / p.living_area
             }));
-    }, [filteredPropertiesMemo]);
 
-    const priceByPostalCodeData = useMemo(() => {
+        // Price by postal code data
         const postalGroups = d3.group(
             filteredPropertiesMemo.filter(p => p.price),
             d => d.postal_code.substring(0, 4)
         );
 
-        return Array.from(postalGroups, ([postal_code, group]) => ({
+        const priceByPostal = Array.from(postalGroups, ([postal_code, group]) => ({
             postal_code,
             avg_price: d3.mean(group, d => d.price) || 0,
             median_price: d3.median(group, d => d.price) || 0,
             count: group.length
         })).sort((a, b) => b.avg_price - a.avg_price);
-    }, [filteredPropertiesMemo]);
 
-    const timeSeriesData = useMemo(() => {
-        // Separate active and sold properties
+        // Time series data
         const soldProperties = filteredPropertiesMemo
             .filter(p => p.status === 'sold' && p.selling_date && dayjs(p.selling_date).isValid() && dayjs(p.selling_date).year() >= 2024)
             .sort((a, b) => dayjs(a.selling_date).valueOf() - dayjs(b.selling_date).valueOf());
@@ -204,9 +197,6 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
             }))
             .sort((a, b) => dayjs(a.effectiveDate).valueOf() - dayjs(b.effectiveDate).valueOf());
 
-        if (soldProperties.length === 0 && activeProperties.length === 0) return [];
-
-        // Group properties by month
         const soldMonthlyGroups = d3.group(soldProperties, d => 
             dayjs(d.selling_date).format('YYYY-MM')
         );
@@ -215,17 +205,12 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
             dayjs(d.effectiveDate).format('YYYY-MM')
         );
 
-        // Get unique months from both groups
         const uniqueMonths = new Set([
             ...Array.from(soldMonthlyGroups.keys()),
             ...Array.from(activeMonthlyGroups.keys())
         ]);
 
-        // Convert to array and sort chronologically
-        const sortedMonths = Array.from(uniqueMonths).sort();
-
-        // Create data points only for months that have data
-        return sortedMonths.map(month => {
+        const timeSeries = Array.from(uniqueMonths).sort().map(month => {
             const soldGroup = soldMonthlyGroups.get(month) || [];
             const activeGroup = activeMonthlyGroups.get(month) || [];
             const allProperties = [...soldGroup, ...activeGroup];
@@ -246,71 +231,46 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
                 sold_count: soldGroup.length
             };
         });
-    }, [filteredPropertiesMemo]);
 
-    const pricePerSqmData = useMemo(() => {
-        const postalGroups = d3.group(
-            filteredPropertiesMemo.filter(p => p.living_area && p.price),
-            d => d.postal_code.substring(0, 4)
-        );
-
-        return Array.from(postalGroups, ([postal_code, group]) => ({
+        // Price per Square Meter Analysis
+        const pricePerSqm = Array.from(postalGroups, ([postal_code, group]) => ({
             postal_code,
-            avg_price_per_sqm: d3.mean(group, d => d.price / d.living_area) || 0,
-            median_price_per_sqm: d3.median(group, d => d.price / d.living_area) || 0,
+            avg_price_per_sqm: d3.mean(group.filter(p => p.living_area), d => d.price / d.living_area) || 0,
+            median_price_per_sqm: d3.median(group.filter(p => p.living_area), d => d.price / d.living_area) || 0,
             count: group.length
         })).sort((a, b) => b.avg_price_per_sqm - a.avg_price_per_sqm);
-    }, [filteredPropertiesMemo]);
 
-    // Rooms Impact Analysis Data
-    const roomsImpactData = useMemo(() => {
+        // Rooms Impact Analysis
         const roomGroups = d3.group(
             filteredPropertiesMemo.filter(p => p.num_rooms && p.price),
             d => d.num_rooms
         );
 
-        return Array.from(roomGroups, ([rooms, group]) => ({
+        const roomsImpact = Array.from(roomGroups, ([rooms, group]) => ({
             rooms: Number(rooms),
             count: group.length,
-            avgPrice: d3.mean(group, d => d.price) || 0,
-            medianPrice: d3.median(group, d => d.price) || 0,
-            avgSize: d3.mean(group, d => d.living_area) || 0
-        })).sort((a, b) => a.rooms - b.rooms);
-    }, [filteredPropertiesMemo]);
-
-    // Room Price Premium Analysis Data
-    const roomPricePremiumData = useMemo(() => {
-        const roomGroups = d3.group(
-            filteredPropertiesMemo.filter(p => p.num_rooms && p.price),
-            d => d.num_rooms
-        );
-
-        const data = Array.from(roomGroups, ([rooms, group]) => ({
-            rooms: Number(rooms),
-            medianPrice: d3.median(group, d => d.price) || 0,
-            count: group.length
+            avg_price: d3.mean(group, d => d.price) || 0,
+            median_price: d3.median(group, d => d.price) || 0
         })).sort((a, b) => a.rooms - b.rooms);
 
-        // Calculate price premium compared to previous room count
-        return data.map((item, index) => ({
+        // Room Price Premium Analysis
+        const roomPricePremium = roomsImpact.map((item, index) => ({
             rooms: item.rooms,
             count: item.count,
-            medianPrice: item.medianPrice,
-            pricePremium: index > 0 ? item.medianPrice - data[index - 1].medianPrice : 0,
-            percentageIncrease: index > 0 ? ((item.medianPrice - data[index - 1].medianPrice) / data[index - 1].medianPrice) * 100 : 0
-        })).filter(d => d.rooms <= 10);  // Filter to show only up to 10 rooms
-    }, [filteredPropertiesMemo]);
+            median_price: item.median_price,
+            pricePremium: index > 0 ? item.avg_price - roomsImpact[index - 1].avg_price : 0,
+            percentageIncrease: index > 0 ? ((item.avg_price - roomsImpact[index - 1].avg_price) / roomsImpact[index - 1].avg_price) * 100 : 0
+        })).filter(d => d.rooms <= 10);
 
-    // Calculate regression line for scatter plot
-    const calculateRegressionLine = useCallback((data: any[]) => {
-        const xValues = data.map(d => d.living_area);
-        const yValues = data.map(d => d.price);
+        // Calculate regression line
+        const xValues = scatter.map(d => d.living_area);
+        const yValues = scatter.map(d => d.price);
         
         const xMean = d3.mean(xValues) || 0;
         const yMean = d3.mean(yValues) || 0;
         
         const ssXX = d3.sum(xValues, x => Math.pow(x - xMean, 2));
-        const ssXY = d3.sum(data, d => (d.living_area - xMean) * (d.price - yMean));
+        const ssXY = d3.sum(scatter, d => (d.living_area - xMean) * (d.price - yMean));
         
         const slope = ssXY / ssXX;
         const intercept = yMean - slope * xMean;
@@ -318,17 +278,27 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
         const minX = Math.min(...xValues);
         const maxX = Math.max(...xValues);
         
-        return [
+        const regressionLine = [
             { x: minX, y: slope * minX + intercept },
             { x: maxX, y: slope * maxX + intercept }
         ];
+
+        return {
+            scatterData: scatter,
+            priceByPostalCodeData: priceByPostal,
+            timeSeriesData: timeSeries,
+            regressionLine,
+            priceByRoomsData: roomsImpact,
+            priceByRoomsPremiumData: roomPricePremium,
+            pricePerSqmData: pricePerSqm
+        };
+    }, [filteredPropertiesMemo]);
+
+    // Handlers for filter panel
+    const handleFilterChange = useCallback((newFilters: FilterOptions) => {
+        setPendingFilters(newFilters);
     }, []);
 
-    const regressionLine = useMemo(() => {
-        return calculateRegressionLine(scatterData);
-    }, [scatterData, calculateRegressionLine]);
-
-    // Memoize handlers
     const applyFilters = useCallback(() => {
         setFilters(pendingFilters);
     }, [pendingFilters]);
@@ -346,115 +316,6 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
         setPendingFilters(resetValues);
         setFilters(resetValues);
     }, [ranges]);
-
-    // Memoize FilterPanel component
-    const FilterPanel = useMemo(() => {
-        return (
-            <Paper sx={{ p: 3, mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h6">
-                        Filters
-                    </Typography>
-                    <Box>
-                        <Button 
-                            variant="outlined" 
-                            onClick={resetFilters} 
-                            sx={{ mr: 1 }}
-                        >
-                            Reset
-                        </Button>
-                        <Button 
-                            variant="contained" 
-                            onClick={applyFilters}
-                        >
-                            Apply Filters
-                        </Button>
-                    </Box>
-                </Box>
-                <Grid container spacing={3}>
-                    <Grid item xs={12} md={6}>
-                        <Stack spacing={2}>
-                            <DatePicker
-                                label="Start Date"
-                                value={pendingFilters.startDate}
-                                onChange={(newValue) => setPendingFilters(prev => ({ ...prev, startDate: newValue }))}
-                                slotProps={{ textField: { fullWidth: true } }}
-                            />
-                            <DatePicker
-                                label="End Date"
-                                value={pendingFilters.endDate}
-                                onChange={(newValue) => setPendingFilters(prev => ({ ...prev, endDate: newValue }))}
-                                slotProps={{ textField: { fullWidth: true } }}
-                            />
-                        </Stack>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                        <Stack spacing={2}>
-                            <FormControl fullWidth>
-                                <InputLabel>Property Type</InputLabel>
-                                <Select
-                                    value={pendingFilters.propertyType}
-                                    label="Property Type"
-                                    onChange={(e) => setPendingFilters(prev => ({ ...prev, propertyType: e.target.value }))}
-                                >
-                                    <MenuItem value="all">All</MenuItem>
-                                    <MenuItem value="appartement">Apartment</MenuItem>
-                                    <MenuItem value="huis">House</MenuItem>
-                                </Select>
-                            </FormControl>
-                            <FormControl fullWidth>
-                                <InputLabel>Status</InputLabel>
-                                <Select
-                                    value={pendingFilters.status}
-                                    label="Status"
-                                    onChange={(e) => setPendingFilters(prev => ({ ...prev, status: e.target.value }))}
-                                >
-                                    <MenuItem value="all">All</MenuItem>
-                                    <MenuItem value="active">Active</MenuItem>
-                                    <MenuItem value="sold">Sold</MenuItem>
-                                </Select>
-                            </FormControl>
-                        </Stack>
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                        <Typography gutterBottom>Number of Rooms</Typography>
-                        <Slider
-                            value={pendingFilters.numRooms}
-                            onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, numRooms: newValue as [number, number] }))}
-                            valueLabelDisplay="auto"
-                            min={ranges.rooms.min}
-                            max={ranges.rooms.max}
-                            marks
-                        />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                        <Typography gutterBottom>Price Range (€)</Typography>
-                        <Slider
-                            value={pendingFilters.priceRange}
-                            onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, priceRange: newValue as [number, number] }))}
-                            valueLabelDisplay="auto"
-                            min={ranges.price.min}
-                            max={ranges.price.max}
-                            step={50000}
-                            valueLabelFormat={(value) => `€${(value/1000)}k`}
-                        />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                        <Typography gutterBottom>Size Range (m²)</Typography>
-                        <Slider
-                            value={pendingFilters.sizeRange}
-                            onChange={(_, newValue) => setPendingFilters(prev => ({ ...prev, sizeRange: newValue as [number, number] }))}
-                            valueLabelDisplay="auto"
-                            min={ranges.size.min}
-                            max={ranges.size.max}
-                            step={5}
-                            valueLabelFormat={(value) => `${value}m²`}
-                        />
-                    </Grid>
-                </Grid>
-            </Paper>
-        );
-    }, [pendingFilters, ranges, applyFilters, resetFilters]);
 
     if (loading) {
         return (
@@ -474,387 +335,24 @@ const PropertyCharts: React.FC<PropertyChartsProps> = ({ metropolitanAreaId }) =
 
     return (
         <Box mt={4}>
-            {FilterPanel}
+            <FilterPanel
+                pendingFilters={pendingFilters}
+                ranges={ranges}
+                onFilterChange={handleFilterChange}
+                onApplyFilters={applyFilters}
+                onResetFilters={resetFilters}
+            />
             <Grid container spacing={3}>
                 {/* Price Heatmap */}
                 <Grid item xs={12}>
                     <PriceHeatmap properties={filteredPropertiesMemo} />
                 </Grid>
 
-                {/* Price vs Living Area Scatter Plot */}
-                <Grid item xs={12}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Price vs Living Area
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="living_area" 
-                                    name="Living Area" 
-                                    unit="m²"
-                                    type="number"
-                                >
-                                    <Label value="Living Area (m²)" offset={-10} position="insideBottom" />
-                                </XAxis>
-                                <YAxis 
-                                    dataKey="price" 
-                                    name="Price" 
-                                    unit="€"
-                                    tickFormatter={(value) => `€${(value/1000)}k`}
-                                >
-                                    <Label value="Price (€)" angle={-90} position="insideLeft" offset={10} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any, name: string) => {
-                                        if (name === 'Price') return `€${Number(value).toLocaleString()}`;
-                                        if (name === 'Living Area') return `${value} m²`;
-                                        return value;
-                                    }}
-                                />
-                                <Legend />
-                                <Scatter 
-                                    name="Properties" 
-                                    data={scatterData} 
-                                    fill="#8884d8"
-                                />
-                                <Line
-                                    name="Regression Line"
-                                    data={regressionLine}
-                                    dataKey="y"
-                                    stroke="#ff7300"
-                                    dot={false}
-                                />
-                            </ScatterChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
-
-                {/* Price by Postal Code */}
-                <Grid item xs={12}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Price by Postal Code
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <BarChart data={priceByPostalCodeData} margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="postal_code" />
-                                <YAxis 
-                                    tickFormatter={(value) => `€${(value/1000)}k`}
-                                >
-                                    <Label value="Price (€)" angle={-90} position="insideLeft" offset={10} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any) => `€${Number(value).toLocaleString()}`}
-                                />
-                                <Legend />
-                                <Bar 
-                                    dataKey="avg_price" 
-                                    fill="#8884d8" 
-                                    name="Average Price"
-                                />
-                                <Bar 
-                                    dataKey="median_price" 
-                                    fill="#82ca9d" 
-                                    name="Median Price"
-                                />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
-
-                {/* Time Series */}
-                <Grid item xs={12}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Price Trends Over Time
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <ComposedChart data={timeSeriesData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="month" 
-                                    tickFormatter={(value) => {
-                                        // Parse YYYY-MM format
-                                        const [year, month] = value.split('-');
-                                        return dayjs(`${year}-${month}-01`).format('MMM YY');
-                                    }}
-                                />
-                                <YAxis 
-                                    yAxisId="left"
-                                    orientation="left"
-                                    tickFormatter={(value) => value.toFixed(0)}
-                                >
-                                    <Label value="Number of Properties" angle={-90} position="insideLeft" offset={10} />
-                                </YAxis>
-                                <YAxis 
-                                    yAxisId="right"
-                                    orientation="right"
-                                    tickFormatter={(value) => value.toFixed(0)}
-                                >
-                                    <Label value="Days to Sell" angle={90} position="insideRight" offset={10} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any, name: string) => {
-                                        if (name === 'avg_days_to_sell') return [value.toFixed(1), 'Avg Days to Sell'];
-                                        if (name === 'active_count') return [value, 'Active Properties'];
-                                        if (name === 'sold_count') return [value, 'Sold Properties'];
-                                        return [value, name];
-                                    }}
-                                    labelFormatter={(label) => dayjs(label).format('MMMM YYYY')}
-                                />
-                                <Legend />
-                                <Line
-                                    yAxisId="right"
-                                    type="monotone"
-                                    dataKey="avg_days_to_sell"
-                                    stroke="#ffc658"
-                                    name="Avg Days to Sell"
-                                />
-                                <Area
-                                    yAxisId="left"
-                                    type="monotone"
-                                    dataKey="active_count"
-                                    fill="#82ca9d"
-                                    stroke="#82ca9d"
-                                    opacity={0.1}
-                                    name="Active Properties"
-                                    stackId="1"
-                                />
-                                <Area
-                                    yAxisId="left"
-                                    type="monotone"
-                                    dataKey="sold_count"
-                                    fill="#8884d8"
-                                    stroke="#8884d8"
-                                    opacity={0.1}
-                                    name="Sold Properties"
-                                    stackId="1"
-                                />
-                            </ComposedChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
-
-                {/* Price per Square Meter Analysis */}
-                <Grid item xs={12}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Price per Square Meter by Postal Code
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <BarChart data={pricePerSqmData} margin={{ top: 20, right: 20, bottom: 20, left: 60 }}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="postal_code" />
-                                <YAxis 
-                                    tickFormatter={(value) => `€${value.toFixed(0)}`}
-                                >
-                                    <Label value="Price per m² (€)" angle={-90} position="insideLeft" offset={10} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any) => `€${Number(value).toFixed(0)}/m²`}
-                                />
-                                <Legend />
-                                <Bar 
-                                    dataKey="avg_price_per_sqm" 
-                                    fill="#8884d8" 
-                                    name="Average Price/m²"
-                                />
-                                <Bar 
-                                    dataKey="median_price_per_sqm" 
-                                    fill="#82ca9d" 
-                                    name="Median Price/m²"
-                                />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
-
-                {/* Market Velocity Dashboard */}
-                <Grid item xs={12}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Market Velocity Analysis
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <ComposedChart data={timeSeriesData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="month" 
-                                    tickFormatter={(value) => {
-                                        // Parse YYYY-MM format
-                                        const [year, month] = value.split('-');
-                                        return dayjs(`${year}-${month}-01`).format('MMM YY');
-                                    }}
-                                />
-                                <YAxis 
-                                    yAxisId="left"
-                                    orientation="left"
-                                    tickFormatter={(value) => value.toFixed(0)}
-                                >
-                                    <Label value="Days to Sell" angle={-90} position="insideLeft" offset={10} />
-                                </YAxis>
-                                <YAxis 
-                                    yAxisId="right"
-                                    orientation="right"
-                                    tickFormatter={(value) => `€${(value/1000)}k`}
-                                >
-                                    <Label value="Price Range (€)" angle={90} position="insideRight" offset={10} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any, name: string) => {
-                                        if (name.includes('Price')) return `€${Number(value).toLocaleString()}`;
-                                        return value.toFixed(1);
-                                    }}
-                                    labelFormatter={(label) => dayjs(label).format('MMMM YYYY')}
-                                />
-                                <Legend />
-                                <Bar
-                                    yAxisId="left"
-                                    dataKey="avg_days_to_sell"
-                                    fill="#8884d8"
-                                    name="Average Days to Sell"
-                                />
-                                <Line
-                                    yAxisId="right"
-                                    type="monotone"
-                                    dataKey="avg_price"
-                                    stroke="#82ca9d"
-                                    name="Average Price"
-                                />
-                                <Line
-                                    yAxisId="right"
-                                    type="monotone"
-                                    dataKey="median_price"
-                                    stroke="#ffc658"
-                                    name="Median Price"
-                                />
-                            </ComposedChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
-
-                {/* Room Distribution Analysis */}
-                <Grid item xs={12} md={6}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Price Premium per Additional Room
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <ComposedChart 
-                                data={roomPricePremiumData} 
-                                margin={{ top: 20, right: 60, bottom: 20, left: 60 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="rooms"
-                                    label={{ value: 'Number of Rooms', position: 'insideBottom', offset: -10 }}
-                                />
-                                <YAxis 
-                                    yAxisId="left"
-                                    tickFormatter={(value) => `€${(value/1000)}k`}
-                                >
-                                    <Label value="Price Premium (€)" angle={-90} position="center" offset={0} dx={-50} />
-                                </YAxis>
-                                <YAxis 
-                                    yAxisId="right"
-                                    orientation="right"
-                                    tickFormatter={(value) => `${value.toFixed(1)}%`}
-                                >
-                                    <Label value="Percentage Increase" angle={90} position="center" offset={0} dx={50} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any, name: string, props: any) => {
-                                        if (name === "Price Premium") {
-                                            const roundedValue = Math.round(value / 1000) * 1000;
-                                            return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
-                                        }
-                                        if (name === "Percentage Increase") {
-                                            return [`${value.toFixed(1)}% (${props.payload.count} properties)`, name];
-                                        }
-                                        return [value, name];
-                                    }}
-                                />
-                                <Legend 
-                                    verticalAlign="bottom"
-                                    align="center"
-                                    layout="horizontal"
-                                    wrapperStyle={{
-                                        paddingTop: "20px"
-                                    }}
-                                />
-                                <Bar 
-                                    yAxisId="left"
-                                    dataKey="pricePremium" 
-                                    fill="#8884d8" 
-                                    name="Price Premium"
-                                />
-                                <Line 
-                                    yAxisId="right"
-                                    type="monotone"
-                                    dataKey="percentageIncrease" 
-                                    stroke="#82ca9d" 
-                                    name="Percentage Increase"
-                                />
-                            </ComposedChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
-
-                {/* Property Features Impact */}
-                <Grid item xs={12} md={6}>
-                    <Paper sx={{ p: 3 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Price Impact by Number of Rooms
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <BarChart 
-                                data={roomsImpactData.filter(d => d.rooms <= 10)} 
-                                margin={{ top: 20, right: 30, bottom: 20, left: 60 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="rooms"
-                                    label={{ value: 'Number of Rooms', position: 'insideBottom', offset: -10 }}
-                                />
-                                <YAxis 
-                                    tickFormatter={(value) => `€${(value/1000)}k`}
-                                >
-                                    <Label value="Average Price (€)" angle={-90} position="center" dx={-60} />
-                                </YAxis>
-                                <Tooltip 
-                                    formatter={(value: any, name: string, props: any) => {
-                                        const roundedValue = Math.round(value / 1000) * 1000;
-                                        return [`€${Number(roundedValue).toLocaleString()} (${props.payload.count} properties)`, name];
-                                    }}
-                                />
-                                <Legend 
-                                    verticalAlign="bottom"
-                                    align="center"
-                                    layout="horizontal"
-                                    wrapperStyle={{
-                                        paddingTop: "20px"
-                                    }}
-                                />
-                                <Bar 
-                                    dataKey="avgPrice" 
-                                    fill="#8884d8" 
-                                    name="Average Price"
-                                />
-                                <Bar 
-                                    dataKey="medianPrice" 
-                                    fill="#82ca9d" 
-                                    name="Median Price"
-                                />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </Paper>
-                </Grid>
+                {/* Charts */}
+                <PropertyChartData {...chartData} />
             </Grid>
         </Box>
     );
 };
 
-export default React.memo(PropertyCharts); 
+export default PropertyCharts; 
