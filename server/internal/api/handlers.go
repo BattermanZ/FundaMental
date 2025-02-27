@@ -38,6 +38,7 @@ type SpiderRequest struct {
 	Place     string `json:"place"`
 	MaxPages  *int   `json:"max_pages"`
 	QueueSold bool   `json:"queue_sold"`
+	Type      string `json:"type"` // 'active' or 'sold'
 }
 
 func NewHandler(db *database.Database, logger *logrus.Logger) *Handler {
@@ -203,7 +204,7 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 				// Queue sold spider only if requested
 				if req.QueueSold {
 					h.logger.WithField("city", normalizedCity).Info("Starting sold spider")
-					err = h.spiderManager.RunSoldSpider(normalizedCity, nil, true)
+					err = h.spiderManager.RunSoldSpider(normalizedCity, nil)
 					if err != nil {
 						h.logger.WithError(err).WithField("city", normalizedCity).Error("Failed to run sold spider")
 						continue
@@ -243,7 +244,7 @@ func (h *Handler) RunActiveSpider(c *gin.Context) {
 
 		if req.QueueSold {
 			h.logger.Info("Active spider completed, starting sold spider")
-			if err := h.spiderManager.RunSoldSpider(req.Place, nil, false); err != nil {
+			if err := h.spiderManager.RunSoldSpider(req.Place, nil); err != nil {
 				h.logger.WithError(err).Error("Failed to run sold spider")
 				return
 			}
@@ -276,24 +277,94 @@ func (h *Handler) RunSpider(c *gin.Context) {
 		normalizedCity = "amsterdam"
 	}
 
-	// Run the spider
-	err := h.spiderManager.RunSoldSpider(normalizedCity, nil)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Run the appropriate spider based on type
+	if req.Place == "" {
+		// If no place specified, run for all configured cities
+		cities, err := config.GetCityNames(h.db)
+		if err != nil {
+			h.logger.WithError(err).Error("Failed to get configured cities")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configured cities"})
+			return
+		}
+
+		// Start a single goroutine that processes all cities sequentially
+		go func() {
+			for _, city := range cities {
+				normalizedCity := config.NormalizeCity(city)
+
+				// Run active spider first
+				if req.Type == "active" || req.QueueSold {
+					h.logger.WithField("city", normalizedCity).Info("Starting active spider")
+					err := h.spiderManager.RunActiveSpider(normalizedCity, nil)
+					if err != nil {
+						h.logger.WithError(err).WithField("city", normalizedCity).Error("Failed to run active spider")
+						continue
+					}
+					h.logger.WithField("city", normalizedCity).Info("Active spider completed successfully")
+				}
+
+				// Run sold spider if requested
+				if req.Type == "sold" || req.QueueSold {
+					h.logger.WithField("city", normalizedCity).Info("Starting sold spider")
+					err = h.spiderManager.RunSoldSpider(normalizedCity, nil)
+					if err != nil {
+						h.logger.WithError(err).WithField("city", normalizedCity).Error("Failed to run sold spider")
+						continue
+					}
+					h.logger.WithField("city", normalizedCity).Info("Sold spider completed successfully")
+				}
+			}
+
+			// Update district hulls after all spiders have completed
+			h.logger.Info("Starting district hulls update")
+			if err := h.districtManager.UpdateDistrictHulls(); err != nil {
+				h.logger.WithError(err).Error("Failed to update district hulls after spider completion")
+				return
+			}
+			h.logger.Info("District hulls updated successfully")
+		}()
+
+		message := "Spider process started. Cities will be processed sequentially."
+		if req.QueueSold {
+			message = "Spider process started. For each city, active properties will be processed first, followed by sold properties. District hulls will be updated automatically after completion."
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": message,
+		})
 		return
 	}
 
-	// Queue sold spider if requested
-	if req.QueueSold {
-		err = h.spiderManager.RunSoldSpider(req.Place, req.MaxPages)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// If a specific place was provided
+	go func() {
+		// Run active spider first if requested
+		if req.Type == "active" || req.QueueSold {
+			err := h.spiderManager.RunActiveSpider(normalizedCity, nil)
+			if err != nil {
+				h.logger.WithError(err).Error("Failed to run active spider")
+				return
+			}
+		}
+
+		// Run sold spider if requested
+		if req.Type == "sold" || req.QueueSold {
+			if err := h.spiderManager.RunSoldSpider(normalizedCity, req.MaxPages); err != nil {
+				h.logger.WithError(err).Error("Failed to run sold spider")
+				return
+			}
+		}
+
+		// Update district hulls after processing
+		h.logger.Info("Starting district hulls update")
+		if err := h.districtManager.UpdateDistrictHulls(); err != nil {
+			h.logger.WithError(err).Error("Failed to update district hulls after spider completion")
 			return
 		}
-	}
+		h.logger.Info("District hulls updated successfully")
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":     "Spider process started",
+		"status":      "Spider started",
 		"sold_queued": req.QueueSold,
 	})
 }

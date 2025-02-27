@@ -175,7 +175,7 @@ func (s *Scheduler) runSoldSpiders() {
 			"job_type":        JobTypeSold.String(),
 		}).Info("Starting spider job")
 
-		if err := s.spiderManager.RunSoldSpider(normalized, nil, true); err != nil {
+		if err := s.spiderManager.RunSoldSpider(normalized, nil); err != nil {
 			s.logger.WithError(err).WithFields(logrus.Fields{
 				"city":            city,
 				"normalized_city": normalized,

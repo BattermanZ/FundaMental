@@ -19,8 +19,9 @@ func SetupRoutes(router *gin.Engine, db *database.Database) {
 		api.GET("/properties/area/:postal_prefix", handler.GetAreaStats)
 		api.POST("/geocode/update", handler.UpdateCoordinates)
 		api.POST("/districts/update", handler.UpdateDistrictHulls)
+		api.POST("/spider/run", handler.RunSpider)
 		api.POST("/spiders/active", handler.RunActiveSpider)
-		api.POST("/spiders/sold", handler.RunSoldSpider)
+		api.POST("/spiders/sold", handler.RunSpider)
 
 		// Telegram configuration routes
 		api.GET("/telegram/config", handler.GetTelegramConfig)
